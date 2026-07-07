@@ -6,3 +6,4 @@ manifest.toml
 # Claude Code local session state (scratchpad paths, permission grants, locks)
 .claude/
 
+.wl-shim/
