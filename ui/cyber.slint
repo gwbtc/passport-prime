@@ -1,0 +1,29 @@
+// Cyberpunk styling helpers shared across pages.
+import { Theme } from "@ui/theme.slint";
+
+export global Cyber {
+    // Page background gradient — deep blue-black in dark, cool light in light mode.
+    out property <brush> page-bg: Theme.is-dark
+        ? @linear-gradient(160deg, #05080f 0%, #0a1120 60%, #0e1c30 100%)
+        : @linear-gradient(160deg, #eef2f7 0%, #e3ebf4 100%);
+    out property <color> neon: Theme.palette-primary;
+    // Dark, readable text color to sit on a neon-filled button.
+    out property <color> on-neon: #05080f;
+}
+
+// A framed, optionally glowing surface panel with a neon edge.
+export component NeonPanel inherits Rectangle {
+    in property <color> accent: Theme.palette-primary;
+    background: Theme.is-dark ? Theme.palette-surface.with-alpha(0.72) : Theme.palette-surface;
+    border-width: 1px;
+    border-color: accent.with-alpha(0.55);
+    border-radius: 8px;
+    @children
+}
+
+// Monospace text for tickets, addresses, and other machine values.
+export component MonoText inherits Text {
+    font-family: "Source Code Pro";
+    color: Theme.palette-foreground;
+    wrap: word-wrap;
+}

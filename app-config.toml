@@ -1,0 +1,28 @@
+# Foundation application configuration
+app-name = "groundwire"
+friendly-app-name = "groundwire"
+launcher-app-name = "groundwire"
+description = "Spawn and manage Groundwire identities"
+icon = "resources/icon.svg"
+app-id = "0x8293f5297acdbf185ed039edee7e0013"
+version = "0.1.0"
+min-keyos-version = "1.0.0"
+
+[publisher]
+name = "Groundwire Foundation"
+contact-email = "jackson@groundwire.io"
+support-url = "https://groundwire.io"
+
+[permissions]
+template = ["gui-app"]
+"os/settings" = ["GetDeviceName", "GetLocale", "GetPrimeColor"]
+# Read/write the per-app encrypted identities.json in Location::AppData.
+"os/fs" = [
+    "OpenFileMessage",
+    "CloseFile",
+    "ReadFile",
+    "WriteFile",
+    "SeekFile",
+    "TruncateFile",
+    "Flush",
+]

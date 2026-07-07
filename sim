@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+# Run the KeyOS hosted simulator under a memory cap.
+#
+# Why: `foundation sim`'s keyos-kernel backs its emulated RAM with the host
+# allocator (xous test/hosted arch -> alloc()), so it has NO in-sim ceiling.
+# A runaway grew to ~18GB anon-rss and thrashed 34GB of swap, halting the box.
+# MemorySwapMax=0 is the load-bearing line: no swap => no thrash => no halt.
+# If it does run away it hits MemoryMax and only the sim scope is OOM-killed,
+# leaving the rest of the system healthy.
+#
+# Override the ceiling with SIM_MEM_MAX (e.g. SIM_MEM_MAX=16G ./sim).
+set -eu
+exec systemd-run --user --scope --quiet \
+  -p MemoryMax="${SIM_MEM_MAX:-12G}" \
+  -p MemorySwapMax=0 \
+  -- env RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2025-09-11}" \
+     foundation sim "$@"

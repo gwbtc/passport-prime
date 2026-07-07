@@ -1,0 +1,38 @@
+[package]
+name = "groundwire"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+log = "0.4"
+log-server = { package = "xous-api-log", path = "../foundation-sdk/lib/keyos/xous/api/log" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+server = { path = "../foundation-sdk/lib/keyos/server" }
+fs = { path = "../foundation-sdk/lib/keyos/api/fs" }
+slint-keyos-platform = { path = "../foundation-sdk/lib/keyos/slint-keyos-platform/runtime" }
+foundation-themes = { path = "../foundation-sdk/lib/keyos/sdk/crates/foundation-themes" }
+
+# Identity derivation (matches gw-onboard). Pure-Rust, no C deps, for the
+# armv7a-unknown-xous-elf device target.
+k256 = { version = "0.13", default-features = false, features = ["arithmetic", "schnorr"] }
+hmac = { version = "0.12", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
+# ed25519 point arithmetic for the suite-C comet miner (P + s·G, compress/decompress).
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
+
+# Wipe ticket/mnemonic/entropy from memory when the wizard leaves or regenerates.
+zeroize = { version = "1", features = ["alloc"] }
+
+# Entropy for new tickets. Only the hosted/simulator target links this — on the
+# xous device target getrandom has no backend, and the TRNG path is a separate
+# fail-closed seam in main.rs (see docs/trng-spike.md). Already in the tree.
+[target.'cfg(not(target_os = "xous"))'.dependencies]
+getrandom = "0.2"
+
+[build-dependencies]
+foundation-themes = { path = "../foundation-sdk/lib/keyos/sdk/crates/foundation-themes" }
+slint-keyos-platform-build = { path = "../foundation-sdk/lib/keyos/slint-keyos-platform/build" }

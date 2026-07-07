@@ -1,0 +1,81 @@
+// Bridge between the Slint UI and the Rust engine (src/identity.rs, src/store.rs,
+// src/wizard.rs, src/urb/*). In Architecture B the Passport does everything on
+// device: it mines the comet, builds and signs the commit+reveal transactions,
+// and emits broadcast QRs. No host, no ticket export, no key leaves the device.
+
+export struct IdentityDraft {
+    funding-address: string,
+    mnemonic: string,
+}
+
+export struct IdentitySummary {
+    label: string,
+    address: string,
+    stage: int,
+}
+
+// Result of the on-device spawn (mine + build + sign).
+export struct SpawnOutcome {
+    ok: bool,
+    error: string,
+    comet: string,        // the mined @p
+    commit-txid: string,  // display hex
+    reveal-txid: string,  // display hex
+    boot-command: string, // vere -G one-liner
+}
+
+export global GwBridge {
+    // Persisted identities, populated by Rust on startup and after changes.
+    in-out property <[IdentitySummary]> identities;
+
+    // Dice rolls collected toward the current ticket's entropy (50 = 128-bit floor).
+    in-out property <int> roll-count;
+
+    // Record a die face (1..6); returns the new roll count.
+    callback add-roll(int) -> int;
+    // Discard the accumulated dice entropy (start a fresh ticket).
+    callback reset-entropy();
+    // Generate a master ticket + funding address from the dice pool. Stores the
+    // draft in Rust for the backup gate; returns it for display. No persist.
+    callback generate-identity() -> IdentityDraft;
+
+    // The draft's 12 BIP-39 words, in order — for the press-and-hold write-down grid.
+    pure callback mnemonic-words() -> [string];
+
+    // Backup proof (docs §4): 6 shuffled BIP-39 word choices for `position` (0..11).
+    pure callback backup-word-choices(int /* position */) -> [string];
+    // Record one tapped word (in order); returns the running count.
+    callback backup-tap(string) -> int;
+    // Discard the tapped words (restart the quiz).
+    callback backup-reset();
+    // Decode the tapped words, re-derive the address, compare to the draft. On
+    // match, persists the identity with stage=backed_up and returns true.
+    callback confirm-backup() -> bool;
+
+    // QR of the funding address (public) the user pays into.
+    pure callback address-qr() -> image;
+
+    // Funding UTXO. `scan-funding` opens the camera and parses a "txid:vout:sats"
+    // QR; `set-funding` takes the same string typed manually. Both return "" on
+    // success or a human-readable error.
+    callback scan-funding() -> string;
+    callback set-funding(string) -> string;
+
+    // Run the whole on-device spawn: mine the comet, build + sign commit+reveal.
+    // Slow (mining). Returns the outcome; on success the raw txs are held in Rust
+    // for the broadcast QRs below.
+    callback run-spawn() -> SpawnOutcome;
+
+    // QRs of the finalized raw commit / reveal transactions, for broadcast.
+    pure callback commit-qr() -> image;
+    pure callback reveal-qr() -> image;
+
+    // Advance a persisted identity's stage (index into `identities`).
+    callback set-stage(int /* index */, int /* stage */);
+    // Record attestation (comet @p, commit txid, reveal txid) and set
+    // stage=attested — the point of no return.
+    callback record-attestation(int /* index */, string, string, string);
+
+    // Delete the identity at the given index.
+    callback delete-identity(int);
+}

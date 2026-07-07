@@ -1,0 +1,29 @@
+{
+  "id": "app_theme",
+  "name": "groundwire Theme",
+  "parent": "default_theme",
+  "tokens": {
+    "colors": {
+      "dark": {
+        "background": "#05080f",
+        "surface": "#0d1424",
+        "primary": "#00f0ff",
+        "primary-pressed": "#00b3c4",
+        "secondary": "#152134",
+        "danger": "#ff2e6e",
+        "text": "#d6f5ff",
+        "text-muted": "#5c7488"
+      },
+      "light": {
+        "background": "#eef2f7",
+        "surface": "#ffffff",
+        "primary": "#0091a8",
+        "primary-pressed": "#006979",
+        "secondary": "#dbe4ee",
+        "danger": "#d6216b",
+        "text": "#0b1220",
+        "text-muted": "#5a6b7d"
+      }
+    }
+  }
+}

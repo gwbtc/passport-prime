@@ -1,0 +1,76 @@
+name: CI
+
+# Tests run on every PR to master (make this a required check in branch
+# protection). Pushes to master additionally build the optimized release app.
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+# The Foundation SDK is Nix-based (manifest: nix_required = true), so both jobs
+# install Nix, install the SDK, and symlink it to ../foundation-sdk — the
+# sibling location every path dependency in Cargo.toml points at.
+env:
+  # Public-release installer. During early access, set the repo variable
+  # FOUNDATION_SDK_INSTALL to your gated installer command (pass any token via a
+  # secret, e.g. `... | bash` with `FOUNDATION_TOKEN: ${{ secrets.FOUNDATION_TOKEN }}`).
+  FOUNDATION_SDK_INSTALL: ${{ vars.FOUNDATION_SDK_INSTALL || 'curl -sSf https://foundation.xyz/sdk/install.sh | bash' }}
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Nix build cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Install Foundation SDK
+        run: bash -c "$FOUNDATION_SDK_INSTALL"
+
+      # Cargo.toml resolves the SDK crates through ../foundation-sdk (see README).
+      - name: Link SDK into the workspace
+        run: ln -sfn "$HOME/.foundation/sdk/current" ../foundation-sdk
+
+      # The SDK's Nix devShell pins the exact toolchain and the system libs
+      # (fontconfig/freetype/etc.) the Slint crates link against.
+      - name: Run tests
+        run: nix develop "$HOME/.foundation/sdk/current" --command cargo test --bins
+
+  release:
+    name: release build
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@main
+      - name: Nix build cache
+        uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Install Foundation SDK
+        run: bash -c "$FOUNDATION_SDK_INSTALL"
+      - name: Link SDK into the workspace
+        run: ln -sfn "$HOME/.foundation/sdk/current" ../foundation-sdk
+
+      - name: Build optimized release
+        run: ../foundation-sdk/bin/foundation build --release
+
+      # Adjust the path once you confirm where `foundation build --release`
+      # writes the packaged app on the runner (and add signing if you need a
+      # signed artifact — that requires a cert provided via a repo secret).
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: groundwire-release
+          path: |
+            target/**/release/groundwire
+            manifest.toml
+          if-no-files-found: error
+          retention-days: 30

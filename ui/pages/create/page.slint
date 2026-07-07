@@ -1,0 +1,496 @@
+import { Theme, UISize, ButtonSize, ButtonVariant } from "@ui/theme.slint";
+import { Button } from "@ui/button.slint";
+import { Navigate } from "../../gen/navigate.slint";
+import { GwBridge, IdentityDraft, SpawnOutcome } from "../../gw-bridge.slint";
+import { Cyber, NeonPanel, MonoText } from "../../cyber.slint";
+
+// On-device onboarding wizard (Architecture B). One component, a `step` property
+// driving each sub-screen. The Passport mines the comet and builds + signs the
+// commit+reveal itself — no host, no ticket export. Stage ints mirror
+// src/store.rs::stage: 1 backed_up · 5 attested · 6 live.
+export component CreatePagePage inherits Rectangle {
+    background: Cyber.page-bg;
+
+    // 1 dice · 2 write · 3 quiz · 4 fund · 5 scan-utxo · 6 spawn · 7 broadcast · 8 boot
+    property <int> step: 1;
+    property <IdentityDraft> draft;
+
+    // Quiz progress + failure flag.
+    property <int> quiz-pos: 0;
+    property <bool> quiz-error: false;
+    // Index of the persisted identity, once the backup proof passes.
+    property <int> saved-index: -1;
+    // Funding-UTXO scan/entry result ("" = ok) and whether one is loaded.
+    property <string> funding-msg: "";
+    property <bool> funding-ready: false;
+    // Result of the on-device spawn.
+    property <SpawnOutcome> outcome;
+    property <bool> spawning: false;
+
+    function reset-wizard() {
+        GwBridge.reset-entropy();
+        GwBridge.roll-count = 0;
+        root.step = 1;
+        root.quiz-pos = 0;
+        root.quiz-error = false;
+        root.saved-index = -1;
+        root.funding-msg = "";
+        root.funding-ready = false;
+        root.spawning = false;
+    }
+
+    init => {
+        reset-wizard();
+    }
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 20px + UISize.control-center-status-bar-height;
+        padding-bottom: 20px;
+        spacing: 12px;
+
+        // ---- Step 1: dice -> mint ticket -------------------------------
+        if step == 1: MonoText {
+            text: "> roll the dice";
+            color: Cyber.neon;
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 1: Text {
+            text: "Roll a physical die and tap each result. 50 rolls = 128 bits — the dice, not the device, are your randomness. Nothing leaves this Passport.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        if step == 1: HorizontalLayout {
+            spacing: 8px;
+            for face in [1, 2, 3, 4, 5, 6]: Button {
+                full-width: true;
+                size: ButtonSize.lg;
+                variant: ButtonVariant.ghost;
+                text: "\{face}";
+                clicked => { GwBridge.roll-count = GwBridge.add-roll(face); }
+            }
+        }
+        if step == 1: MonoText {
+            text: "rolls  \{GwBridge.roll-count} / 50";
+            color: GwBridge.roll-count >= 50 ? Cyber.neon : Theme.palette-muted;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+        if step == 1: Rectangle {
+            height: 8px;
+            border-radius: 4px;
+            background: Theme.palette-surface;
+            border-width: 1px;
+            border-color: Cyber.neon.with-alpha(0.35);
+            Rectangle {
+                x: 0;
+                y: 0;
+                width: GwBridge.roll-count >= 50 ? parent.width : parent.width * GwBridge.roll-count / 50.0;
+                height: parent.height;
+                border-radius: 4px;
+                background: Cyber.neon;
+            }
+        }
+        if step == 1: Rectangle { vertical-stretch: 1; }
+        if step == 1: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            disabled: GwBridge.roll-count < 50;
+            text: "> Generate master ticket";
+            clicked => {
+                if (GwBridge.roll-count >= 50) {
+                    root.draft = GwBridge.generate-identity();
+                    root.step = 2;
+                }
+            }
+        }
+
+        // ---- Step 2: write it down (press-and-hold reveal) -------------
+        if step == 2: MonoText {
+            text: "> write it down";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 2: Text {
+            text: "Write these 12 words on paper, in order. This is both your ship login and your Bitcoin wallet — one secret. Lose it and it is gone forever. Press and hold each row to reveal one word. Do not photograph the screen.";
+            color: Theme.palette-danger;
+            font-family: "Montserrat";
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        if step == 2: VerticalLayout {
+            spacing: 6px;
+            for word[i] in GwBridge.mnemonic-words(): Rectangle {
+            height: 34px;
+            border-radius: 6px;
+            background: Theme.palette-surface;
+            border-width: 1px;
+            border-color: Cyber.neon.with-alpha(0.35);
+            hold := TouchArea { }
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 10px;
+                MonoText {
+                    text: "\{i + 1}";
+                    color: Cyber.neon;
+                    font-size: 14px;
+                    vertical-alignment: center;
+                    width: 24px;
+                }
+                MonoText {
+                    text: hold.pressed ? word : "•••• hold to reveal";
+                    color: hold.pressed ? Theme.palette-foreground : Theme.palette-muted;
+                    font-size: 15px;
+                    font-weight: hold.pressed ? 700 : 400;
+                    vertical-alignment: center;
+                }
+            }
+            }
+        }
+        if step == 2: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "I've written all 12 down";
+            clicked => {
+                GwBridge.backup-reset();
+                root.quiz-pos = 0;
+                root.quiz-error = false;
+                root.step = 3;
+            }
+        }
+
+        // ---- Step 3: prove the paper (quiz) ----------------------------
+        if step == 3: MonoText {
+            text: "> prove your paper";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 3: Text {
+            text: "Reading only from your paper, tap each word in order. This proves your copy is correct before any Bitcoin exists.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        if step == 3: MonoText {
+            text: "word  \{quiz-pos + 1} / 12";
+            color: Cyber.neon;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+        if step == 3: VerticalLayout {
+            spacing: 8px;
+            for choice in GwBridge.backup-word-choices(quiz-pos): Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: choice;
+            clicked => {
+                GwBridge.backup-tap(choice);
+                if (quiz-pos == 11) {
+                    if (GwBridge.confirm-backup()) {
+                        root.saved-index = GwBridge.identities.length - 1;
+                        GwBridge.set-stage(root.saved-index, 1);
+                        root.quiz-pos = 0;
+                        root.quiz-error = false;
+                        root.step = 4;
+                    } else {
+                        root.quiz-error = true;
+                        root.quiz-pos = 0;
+                        GwBridge.backup-reset();
+                    }
+                } else {
+                    root.quiz-pos += 1;
+                }
+            }
+            }
+        }
+        if step == 3 && quiz-error: NeonPanel {
+            accent: Theme.palette-danger;
+            VerticalLayout {
+                padding: 12px;
+                MonoText {
+                    text: "! That doesn't match your paper. Start over, reading each word carefully.";
+                    color: Theme.palette-danger;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+            }
+        }
+
+        // ---- Step 4: fund the address ----------------------------------
+        if step == 4: MonoText {
+            text: "> fund the address";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 4: Text {
+            text: "Send Bitcoin to this address — it funds and inscribes your comet. One payment; a few thousand sats plus fees is plenty.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        if step == 4: HorizontalLayout {
+            alignment: center;
+            Image {
+                source: GwBridge.address-qr();
+                width: 180px;
+                height: 180px;
+                image-fit: contain;
+            }
+        }
+        if step == 4: NeonPanel {
+            VerticalLayout {
+                padding: 12px;
+                MonoText {
+                    text: draft.funding-address;
+                    color: Theme.palette-foreground;
+                    font-size: 13px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+        if step == 4: Rectangle { vertical-stretch: 1; }
+        if step == 4: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "I've sent the payment";
+            clicked => { root.funding-msg = ""; root.funding-ready = false; root.step = 5; }
+        }
+
+        // ---- Step 5: scan the funding UTXO -----------------------------
+        if step == 5: MonoText {
+            text: "> scan the funding UTXO";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 5: Text {
+            text: "Find your payment on a block explorer (mempool.space). Scan a QR of `txid:vout:sats` for the output that paid this address.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 14px;
+            wrap: word-wrap;
+        }
+        if step == 5: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "Scan funding QR";
+            clicked => {
+                root.funding-msg = GwBridge.scan-funding();
+                if (root.funding-msg == "") {
+                    root.funding-ready = true;
+                    root.step = 6;
+                }
+            }
+        }
+        if step == 5 && funding-msg != "": NeonPanel {
+            accent: Theme.palette-danger;
+            VerticalLayout {
+                padding: 12px;
+                MonoText {
+                    text: "! " + funding-msg;
+                    color: Theme.palette-danger;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+            }
+        }
+        if step == 5: Rectangle { vertical-stretch: 1; }
+        if step == 5: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Back";
+            clicked => { root.step = 4; }
+        }
+
+        // ---- Step 6: mine + sign on device -----------------------------
+        if step == 6: MonoText {
+            text: "> mine & sign";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 6: Text {
+            text: "This Passport now mines your comet's networking key and signs the commit + reveal transactions on-device. Your key never leaves. Mining can take a few minutes — keep the Passport awake.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        if step == 6 && outcome.error != "": NeonPanel {
+            accent: Theme.palette-danger;
+            VerticalLayout {
+                padding: 12px;
+                MonoText {
+                    text: "! " + outcome.error;
+                    color: Theme.palette-danger;
+                    font-size: 13px;
+                    font-weight: 600;
+                }
+            }
+        }
+        if step == 6: Rectangle { vertical-stretch: 1; }
+        if step == 6: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "Mine & sign on this Passport";
+            clicked => {
+                root.outcome = GwBridge.run-spawn();
+                if (root.outcome.ok) {
+                    root.step = 7;
+                }
+            }
+        }
+
+        // ---- Step 7: broadcast (commit, then reveal) -------------------
+        if step == 7: MonoText {
+            text: "> broadcast";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 7: MonoText {
+            text: "comet: " + outcome.comet;
+            color: Cyber.neon;
+            font-size: 15px;
+            wrap: word-wrap;
+        }
+        if step == 7: Text {
+            text: "Broadcast COMMIT first (push the raw tx on mempool.space). Wait for it to confirm, THEN broadcast REVEAL. Never re-run after commit.";
+            color: Theme.palette-danger;
+            font-family: "Montserrat";
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        if step == 7: HorizontalLayout {
+            spacing: 10px;
+            VerticalLayout {
+                spacing: 4px;
+                MonoText { text: "commit"; color: Cyber.neon; font-size: 12px; }
+                Image { source: GwBridge.commit-qr(); width: 150px; height: 150px; image-fit: contain; }
+            }
+            VerticalLayout {
+                spacing: 4px;
+                MonoText { text: "reveal"; color: Cyber.neon; font-size: 12px; }
+                Image { source: GwBridge.reveal-qr(); width: 150px; height: 150px; image-fit: contain; }
+            }
+        }
+        if step == 7: Rectangle { vertical-stretch: 1; }
+        if step == 7: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "Both broadcast — record it";
+            clicked => {
+                GwBridge.record-attestation(root.saved-index, outcome.comet, outcome.commit-txid, outcome.reveal-txid);
+                root.step = 8;
+            }
+        }
+
+        // ---- Step 8: boot / live ---------------------------------------
+        if step == 8: MonoText {
+            text: "> go live";
+            color: Cyber.neon;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+        }
+        if step == 8: Text {
+            text: "Once the reveal confirms, run this on your computer to install the runtime and boot your comet. Keep your paper — this Passport holds an encrypted copy; wipe this app before giving the device away.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        // The boot command embeds your comet's private networking key (in --feed).
+        // Treat it like a secret: hold to reveal, and don't let another camera see it.
+        if step == 8: Text {
+            text: "This command contains your comet's private networking key. Keep it private — do not photograph the screen or paste it anywhere public.";
+            color: Theme.palette-danger;
+            font-family: "Montserrat";
+            font-size: 13px;
+            wrap: word-wrap;
+        }
+        if step == 8: NeonPanel {
+            VerticalLayout {
+                padding: 14px;
+                spacing: 8px;
+                MonoText {
+                    text: "// boot your comet — secret";
+                    color: Cyber.neon;
+                    font-size: 12px;
+                    letter-spacing: 1px;
+                }
+                Rectangle {
+                    min-height: 60px;
+                    boothold := TouchArea { }
+                    if boothold.pressed: MonoText {
+                        text: outcome.boot-command;
+                        color: Theme.palette-foreground;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                    if !boothold.pressed: MonoText {
+                        text: "•••• press and hold to reveal — make sure no other camera can see this screen";
+                        color: Theme.palette-muted;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+                }
+            }
+        }
+        if step == 8: Rectangle { vertical-stretch: 1; }
+        if step == 8: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "My comet is live";
+            clicked => {
+                GwBridge.set-stage(root.saved-index, 6);
+                reset-wizard();
+                Navigate.main-page({ });
+            }
+        }
+
+        // ---- Cancel (pre-persist steps only) ---------------------------
+        if step <= 2: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Cancel";
+            clicked => { reset-wizard(); Navigate.backward(); }
+        }
+    }
+}

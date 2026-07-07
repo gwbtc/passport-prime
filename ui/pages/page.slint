@@ -1,0 +1,92 @@
+import { Theme, UISize, ButtonSize, ButtonVariant } from "@ui/theme.slint";
+import { Button } from "@ui/button.slint";
+import { Navigate } from "../gen/navigate.slint";
+import { GwBridge } from "../gw-bridge.slint";
+import { Cyber, NeonPanel, MonoText } from "../cyber.slint";
+
+export component MainPagePage inherits Rectangle {
+    background: Cyber.page-bg;
+
+    VerticalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 24px;
+        padding-right: 24px;
+        padding-top: 24px + UISize.control-center-status-bar-height;
+        padding-bottom: 24px;
+        spacing: 14px;
+
+        MonoText {
+            text: "> groundwire";
+            color: Cyber.neon;
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            horizontal-alignment: left;
+        }
+
+        Text {
+            text: "Spawn and manage Groundwire identities on your Passport.";
+            color: Theme.palette-muted;
+            font-family: "Montserrat";
+            font-size: 15px;
+            font-weight: 500;
+            wrap: word-wrap;
+        }
+
+        if GwBridge.identities.length == 0: NeonPanel {
+            height: 120px;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 8px;
+                MonoText {
+                    text: "// no identities";
+                    color: Cyber.neon;
+                    font-size: 16px;
+                }
+                Text {
+                    text: "Create one to get started — your master ticket is generated and stored on the Passport.";
+                    color: Theme.palette-muted;
+                    font-family: "Montserrat";
+                    font-size: 14px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        for id[i] in GwBridge.identities: NeonPanel {
+            VerticalLayout {
+                padding: 16px;
+                spacing: 6px;
+                MonoText {
+                    text: "~" + id.label;
+                    color: Cyber.neon;
+                    font-size: 18px;
+                    font-weight: 700;
+                }
+                MonoText {
+                    text: id.address;
+                    color: Theme.palette-muted;
+                    font-size: 12px;
+                }
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+        }
+
+        Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "+ Create identity";
+            clicked => {
+                GwBridge.reset-entropy();
+                GwBridge.roll-count = 0;
+                Navigate.create-page({ });
+            }
+        }
+    }
+}
