@@ -1,17 +1,46 @@
-#!/usr/bin/env sh
-# Run the KeyOS hosted simulator under a memory cap.
+#!/usr/bin/env bash
+# Run the KeyOS hosted simulator for groundwire — correctly.
 #
-# Why: `foundation sim`'s keyos-kernel backs its emulated RAM with the host
-# allocator (xous test/hosted arch -> alloc()), so it has NO in-sim ceiling.
-# A runaway grew to ~18GB anon-rss and thrashed 34GB of swap, halting the box.
-# MemorySwapMax=0 is the load-bearing line: no swap => no thrash => no halt.
-# If it does run away it hits MemoryMax and only the sim scope is OOM-killed,
-# leaving the rest of the system healthy.
+# A bare `foundation sim` gets two things wrong in this environment; this handles
+# both, then hands off to it (which rebuilds the app on each launch).
 #
-# Override the ceiling with SIM_MEM_MAX (e.g. SIM_MEM_MAX=16G ./sim).
-set -eu
+# 1. Memory cap. `foundation sim`'s keyos-kernel backs emulated RAM with the host
+#    allocator (xous hosted arch -> alloc()), so it has NO in-sim ceiling. A
+#    runaway grew to ~18GB anon-rss and thrashed 34GB of swap, halting the box.
+#    MemorySwapMax=0 is load-bearing: no swap => no thrash => no halt. On runaway
+#    it hits MemoryMax and only the sim scope is OOM-killed, leaving the rest of
+#    the system healthy. Override the ceiling with SIM_MEM_MAX (e.g.
+#    SIM_MEM_MAX=16G ./sim).
+#
+# 2. Wayland lib path. gui-server's ELF interpreter is a Nix glibc whose loader
+#    doesn't read the system ld.so.cache, so its runtime dlopen of
+#    libwayland-client.so.0 fails (NoWaylandLib -> emulator/window.rs:403 panic).
+#    We hand it a minimal dir of symlinks to the system wayland libs on
+#    LD_LIBRARY_PATH — enough for that dlopen, without the blanket /usr/lib that
+#    ABI-clashes and segfaults the Nix-built kernel.
+set -euo pipefail
+
+here="$(cd -- "$(dirname -- "$0")" && pwd)"
+shim="$here/.wl-shim"
+
+# Build the wayland shim once (symlinks into a dir git ignores). Delete .wl-shim
+# to force a rebuild after a system library update.
+if [ ! -e "$shim/libwayland-client.so.0" ]; then
+  mkdir -p "$shim"
+  for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+            libxkbcommon.so.0 libffi.so.8; do
+    src="$(ldconfig -p | awk -v n="$so" '$1 == n { print $NF; exit }')"
+    if [ -n "$src" ]; then
+      ln -sf "$src" "$shim/$so"
+    else
+      echo "sim: warning: $so not found via ldconfig; the emulator may not start" >&2
+    fi
+  done
+fi
+
 exec systemd-run --user --scope --quiet \
   -p MemoryMax="${SIM_MEM_MAX:-12G}" \
   -p MemorySwapMax=0 \
-  -- env RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2025-09-11}" \
+  -- env LD_LIBRARY_PATH="$shim${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        RUSTUP_TOOLCHAIN="${RUSTUP_TOOLCHAIN:-nightly-2025-09-11}" \
      foundation sim "$@"
