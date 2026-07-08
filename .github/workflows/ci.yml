@@ -1,12 +1,12 @@
 name: CI
 
-# Tests run on every PR to master (make this a required check in branch
-# protection). Pushes to master additionally build the optimized release app.
+# Tests run on every PR to main (make this a required check in branch
+# protection). Pushes to main additionally build the optimized release app.
 on:
   pull_request:
-    branches: [master]
+    branches: [main]
   push:
-    branches: [master]
+    branches: [main]
 
 # The Foundation SDK is Nix-based (manifest: nix_required = true), so both jobs
 # install Nix, install the SDK, and symlink it to ../foundation-sdk — the
@@ -44,7 +44,7 @@ jobs:
   release:
     name: release build
     needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

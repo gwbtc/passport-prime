@@ -1,68 +1,101 @@
 # groundwire
 
-A KeyOS / Passport Prime (Foundation Devices) app for creating and managing
-**Groundwire identities** — Bitcoin-attested Urbit comets. The Passport is an
-offline generator and relay-verifier: it mints the master ticket from dice
-entropy, guides the user through a foolproof onboarding flow, and stores the
-secret at rest. All money and host work is done by `gw-onboard` on the user's
-computer — the Passport never touches the network or the chain.
+A KeyOS / Passport Prime (Foundation Devices) app that creates **Groundwire
+identities** — Bitcoin-attested Urbit comets — **entirely on-device**. The
+Passport mines the comet, encodes the attestation, and builds *and signs* the
+commit + reveal transactions itself, then shows them as broadcast QRs. No host
+signer, no PSBT round-trip, no private key leaves the device — except the
+comet's own networking key, which is delivered once in the boot command because
+it has to boot the ship on your computer.
+
+This is **Architecture B**: the device does the whole spawn. The reference
+host implementation (PSBT + UR2.0 QR, plus the management ops — rekey, escape,
+etc.) lives separately in Causeway; groundwire is spawn-only.
 
 ## What it does
 
-- Generates a 128-bit **master ticket** from user-supplied dice rolls (the
-  dice, not the device, are the randomness — there is no app-facing TRNG on
-  the device; see `docs/trng-spike.md`).
-- Renders the ticket as a **BIP-39 phrase** (the human-facing backup) while
-  keeping the `@q` form internal. Both encode the same 16 entropy bytes.
-- Derives the **BIP-86 taproot funding address** (`m/86'/1'/0'/0/0`, mainnet)
-  on-device, byte-for-byte matching `gw-onboard` (`docs/identity-derivation.md`).
-- Runs a guided onboarding **wizard** that will not let the user spend Bitcoin
-  until the paper backup and the host-derived address are both cryptographically
-  confirmed.
-- Stores identities in the per-app encrypted `identities.json`
-  (`Location::AppData`), and wipes ticket/mnemonic/entropy from memory
-  (`zeroize`) when the wizard leaves or regenerates.
+- Generates a 128-bit seed from user-supplied **dice rolls** (the dice, not the
+  device, are the randomness — SDK 0.4.0 exposes no app-facing TRNG on hardware;
+  see `docs/trng-spike.md`). On the hosted sim it also mixes the OS CSPRNG.
+- Renders the seed as a **BIP-39 phrase** — the single human backup. The same
+  16 bytes are used *directly* as the BIP-32 seed (no PBKDF2).
+- Derives the **BIP-86 taproot funding address** (`m/86'/1'/0'/0/0`) on-device,
+  byte-for-byte matching `gw-onboard` (`docs/identity-derivation.md`).
+- **Mines** a `~daplyd` comet (suite-C ed25519) whose `pass`/`ring` commit to
+  the funding satpoint, and renders its `@p`.
+- **Encodes** the `%spawn` attestation (a bit-exact port of `urb-encoder.hoon`)
+  and wraps it in a `urb`-tagged Taproot leaf.
+- **Builds and signs** the commit + reveal transactions on-device (BIP-341
+  output tweak, BIP-342 tapscript sighash, BIP-340 Schnorr), and emits the
+  finalized **raw transactions as broadcast QRs**.
+- Produces the `vere -G` **boot command** (jam → `@uw` feed) behind a
+  press-and-hold reveal, since the feed embeds the comet's private networking key.
+- Persists identities in the per-app encrypted `identities.json`
+  (`Location::AppData`), and zeroizes seed/mnemonic from memory when the wizard
+  leaves or regenerates.
+
+Every consensus- and protocol-critical byte is pinned to an independent oracle:
+the canonical **BIP-341** wallet test vectors, Causeway's **encoder + jam**
+golden vectors, urbit-ob `@p` anchors, and a neutral **ed25519** oracle.
 
 ## The onboarding wizard
 
 One `CreatePagePage` component (a `step` state machine) in
-`ui/pages/create/page.slint`, driving these screens:
+`ui/pages/create/page.slint`:
 
-`mode → dice → write-down → prove-quiz → handoff → address-match → fund → attest → boot`
+```
+dice → write-down → prove-quiz → fund → enter-UTXO → mine & sign → broadcast → boot
+```
 
-Its central safety property: **no funding command is revealed until (a) the
-tapped backup words re-derive the exact stored address, and (b) the user
-confirms the address `gw-onboard` printed matches the app's.** Because the
-Passport has no IPC to the host, every host confirmation is a human-relayed
-discriminating tap (match the address group, tap the txid tail), never a
-rubber-stampable yes/no. The full design and rationale are in
-`docs/onboarding-flow.md`.
+- **prove-quiz** re-derives the funding address from the tapped backup words and
+  compares; no Bitcoin is touched until the paper copy is proven correct.
+- **enter-UTXO** takes the funding output as `txid:vout:sats` — typed by hand
+  (the common case), with QR scan as a secondary option.
+- **mine & sign** runs the ~65k-iteration star search in **bounded batches
+  driven by a Slint `Timer`**, so mining (minutes on-device) never freezes the
+  UI; a live tries counter and a Cancel button stay responsive throughout.
+- **broadcast** shows the commit and reveal raw-tx QRs (commit first, wait for
+  confirmation, then reveal).
+
+The device only ever signs a **self-spend of its own funding UTXO back to its
+own funding address**, and Taproot commits to the input amount — so a scanned
+funding QR can never redirect funds. Design and rationale: `docs/onboarding-flow.md`.
+
+### Lifecycle
+
+The main page lists identities with their onboarding **stage** (backed-up →
+funded → attested → live) and the comet `@p` once attested. An unfinished
+identity can be **resumed** (rebuilds the seed from its stored mnemonic and
+re-enters the wizard at the right step) or **deleted** behind an inline confirm.
 
 ## Layout
 
 ```
 src/
   main.rs       app entry + GwBridge callback wiring (Slint <-> Rust)
-  entropy.rs    dice entropy pool, SHA-256 conditioning, top-byte guard
+  entropy.rs    dice entropy pool, SHA-256 conditioning
   bip39.rs      BIP-39 encode/decode (no PBKDF2 — raw entropy is the seed)
-  identity.rs   @q rendering + BIP-86 taproot derivation (pinned to vectors)
-  wizard.rs     backup-quiz choices, address-match gate, handoff commands
+  identity.rs   @p rendering + BIP-86 taproot derivation + on-device signing
+  wizard.rs     backup-quiz choices + address-match gate
   store.rs      identities.json persistence + onboarding stage constants
+  urb/          the on-device attestation engine:
+    encoder.rs    bit-exact %spawn encoder (urb-encoder.hoon)
+    tweak.rs      the satpoint tweak the comet's pass commits to
+    mine.rs       suite-C ed25519 comet miner
+    tx.rs         Taproot tx build + BIP-341/342 sighash + Schnorr signing
+    boot.rs       jam + @uw boot-command feed
+    spawn.rs      end-to-end spawn: mine → encode → sign (chunked SpawnJob)
 ui/
   gw-bridge.slint   the Slint <-> Rust interface
-  pages/create/     the wizard
+  pages/            main list + the create wizard
 docs/             derivation, onboarding-flow, TRNG, and vault design notes
 ```
 
 ## Build & run
 
-Requires the [Foundation SDK](https://foundation.xyz) (0.4.0, Nix-based) and the
-pinned nightly toolchain.
-
-The SDK crates are referenced through a **sibling symlink** `../foundation-sdk`
-(so `Cargo.toml` carries no absolute paths and the SDK crates stay out of this
-project's Cargo workspace). Create it once per machine, pointing at your
-installed SDK:
+Requires the [Foundation SDK](https://foundation.xyz) (0.4.0, Nix-based) and its
+pinned nightly toolchain. The SDK crates are referenced through a **sibling
+symlink** `../foundation-sdk`; create it once per machine:
 
 ```sh
 ln -sfn "$HOME/.foundation/sdk/current" ../foundation-sdk
@@ -71,7 +104,7 @@ ln -sfn "$HOME/.foundation/sdk/current" ../foundation-sdk
 Then:
 
 ```sh
-# Unit tests (logic: entropy, bip39, identity vectors, wizard gates)
+# Unit tests (encoder/jam/BIP-341/tweak/miner/boot vectors + wizard gates)
 cargo test --bins
 
 # Launch the hosted simulator (needs a display server)
@@ -79,44 +112,38 @@ cargo test --bins
 ```
 
 `./sim` runs `foundation sim` inside a memory-capped systemd scope
-(`SIM_MEM_MAX`, default 12G) to keep the emulator from OOM-ing the host; set
-`SIM_MEM_MAX` to override.
+(`SIM_MEM_MAX`, default 12G) to keep the emulator from OOM-ing the host.
 
-> Toolchain note: the pinned nightly's `rustc` can SIGSEGV/ICE while compiling
-> some dependency proc-macros. Building with `RUST_MIN_STACK=67108864 -j2`
-> gets through; retries make forward progress as crates cache.
+> **Simulator + Wayland (non-NixOS hosts).** The SDK's `gui-server` is built
+> with a Nix glibc loader that doesn't read the system `ld.so.cache`, so its
+> runtime `dlopen("libwayland-client.so.0")` fails with `NoWaylandLib` even
+> though the lib is installed. Expose the wayland libs to just that loader —
+> e.g. symlink `libwayland-{client,cursor,egl}`, `libxkbcommon`, and `libffi`
+> into a dir and launch with `LD_LIBRARY_PATH=<that dir>`. A blanket
+> `LD_LIBRARY_PATH=/usr/lib` segfaults the kernel, so keep the shim minimal.
 
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs on GitHub Actions:
 
-- **`test`** — on every PR to `master` (and on push): installs Nix + the
+- **`test`** — on every PR to `main` (and on push): installs Nix + the
   Foundation SDK, links `../foundation-sdk`, and runs `cargo test --bins` in the
   SDK's Nix dev shell.
-- **`release build`** — on push to `master`: `foundation build --release` and
+- **`release build`** — on push to `main`: `foundation build --release` and
   uploads the optimized app as a build artifact.
 
-The SDK installer is read from the repo variable `FOUNDATION_SDK_INSTALL`
-(defaults to the public `curl … | bash`); during early access, set it to your
-gated installer. To make tests a **required** check, enable branch protection on
-`master`:
-
-```sh
-gh api -X PUT repos/:owner/:repo/branches/master/protection \
-  -f 'required_status_checks[strict]=true' \
-  -f 'required_status_checks[contexts][]=test' \
-  -F 'enforce_admins=true' \
-  -F 'required_pull_request_reviews=null' \
-  -F 'restrictions=null'
-```
+The SDK installer is read from the repo variable `FOUNDATION_SDK_INSTALL`. To
+make tests a **required** check, enable branch protection on `main`.
 
 ## Security model & scope
 
-- The master ticket is **both the ship login and the Bitcoin wallet — one
-  secret.** Lose it and the identity and its coins are unrecoverable.
-- Derivation currently uses the entropy **directly** as the BIP-32 seed, to
-  match live `gw-onboard`. A proposed change moves both sides to BIP-39 PBKDF2
-  output; the app flips its internal seed step when that lands.
-- The app derives and verifies; it does not broadcast, fund, or mine. Two
-  mainnet-blocking host-side preconditions (no-fund dry run, seed off `argv`)
-  are `gw-onboard` changes, tracked in `docs/onboarding-flow.md` §1.
+- The seed is **both the ship login and the Bitcoin wallet — one secret.** One
+  12-word backup restores both; lose it and the identity and its coins are gone.
+- The comet's **networking key is intrinsically exportable** — it rides in the
+  boot command's `@uw` feed to boot the ship on your computer. That is the one
+  secret that must leave the device; treat the boot command accordingly.
+- Everything else stays on-device: the seed is used *directly* as the BIP-32
+  seed, and every signature is produced on the Passport. The device signs only a
+  self-spend of its own funding UTXO; **broadcasting** the resulting raw txs is
+  done by you (scan the QR into a broadcaster) — the Passport never touches the
+  network or the chain.
