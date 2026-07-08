@@ -77,6 +77,8 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     let pool = Rc::new(RefCell::new(entropy::EntropyPool::default()));
     // The in-progress identity, shared across the wizard's steps.
     let draft = Rc::new(RefCell::new(DraftState::default()));
+    // The chunked mining job, live only while the mine step runs.
+    let spawn_job: Rc<RefCell<Option<urb::spawn::SpawnJob>>> = Rc::new(RefCell::new(None));
 
     let p = pool.clone();
     ui.global::<GwBridge>().on_add_roll(move |face| p.borrow_mut().add_roll(face as u8, now_nanos()) as i32);
@@ -179,9 +181,43 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         Err(e) => e.into(),
     });
 
-    // The whole on-device spawn: mine the comet, build + sign commit+reveal.
+    // Chunked on-device spawn: `begin` sets up the job; the UI's Timer calls
+    // `step` each frame so mining (minutes on-device) never blocks the UI.
     let dr = draft.clone();
-    ui.global::<GwBridge>().on_run_spawn(move || run_spawn(&dr));
+    let sj = spawn_job.clone();
+    ui.global::<GwBridge>().on_spawn_begin(move || spawn_begin(&dr, &sj).into());
+
+    let dr = draft.clone();
+    let sj = spawn_job.clone();
+    ui.global::<GwBridge>().on_spawn_step(move || spawn_step(&sj, &dr));
+
+    // Persist the funding UTXO onto the in-progress identity (stage = funded).
+    let dr = draft.clone();
+    let ids = identities.clone();
+    let m = model.clone();
+    ui.global::<GwBridge>().on_record_funding(move |index| {
+        if index < 0 {
+            return;
+        }
+        let funding_str = dr
+            .borrow()
+            .funding
+            .as_ref()
+            .map(|f| format!("{}:{}:{}", f.txid_display_hex, f.vout, f.value));
+        let Some(fs) = funding_str else { return };
+        if let Some(it) = ids.borrow_mut().get_mut(index as usize) {
+            it.funding = fs;
+            if it.stage < store::stage::FUNDED {
+                it.stage = store::stage::FUNDED;
+            }
+        }
+        persist_and_refresh(&ids.borrow(), &m);
+    });
+
+    // Resume a paused onboarding: rebuild the draft and report where to re-enter.
+    let dr = draft.clone();
+    let ids = identities.clone();
+    ui.global::<GwBridge>().on_load_identity(move |index| load_identity(&dr, &ids, index));
 
     // Broadcast QRs: the finalized raw commit / reveal transactions.
     let dr = draft.clone();
@@ -261,25 +297,19 @@ fn scan_funding(draft: &Rc<RefCell<DraftState>>) -> String {
     }
 }
 
-/// Mine the comet and build + sign the commit+reveal on-device. The raw
-/// transactions are held on the draft for the broadcast QRs.
-fn run_spawn(draft: &Rc<RefCell<DraftState>>) -> SpawnOutcome {
-    let err = |e: &str| SpawnOutcome {
-        ok: false,
-        error: e.into(),
-        comet: SharedString::new(),
-        commit_txid: SharedString::new(),
-        reveal_txid: SharedString::new(),
-        boot_command: SharedString::new(),
-    };
-
-    let (mut entropy, funding) = {
+/// Initialise the chunked spawn from the draft's seed + funding UTXO. Returns
+/// "" on success (the job is stored) or a human-readable error.
+fn spawn_begin(
+    draft: &Rc<RefCell<DraftState>>,
+    job: &Rc<RefCell<Option<urb::spawn::SpawnJob>>>,
+) -> String {
+    let (seed, funding) = {
         let d = draft.borrow();
         if d.entropy.len() != 16 {
-            return err("No ticket in progress.");
+            return "No ticket in progress.".into();
         }
         let Some(f) = &d.funding else {
-            return err("Scan the funding UTXO first.");
+            return "Enter the funding UTXO first.".into();
         };
         (
             d.entropy.clone(),
@@ -290,32 +320,120 @@ fn run_spawn(draft: &Rc<RefCell<DraftState>>) -> SpawnOutcome {
             },
         )
     };
-
     let aux = aux_rand();
-    let result = urb::spawn::spawn_identity(&entropy, &funding, FEE_RATE, spawn_rng(&entropy), &aux, BOOT_URL);
-    {
-        use zeroize::Zeroize;
-        entropy.zeroize();
+    match urb::spawn::SpawnJob::new(&seed, funding, FEE_RATE, spawn_rng(&seed), aux, BOOT_URL) {
+        Ok(j) => {
+            *job.borrow_mut() = Some(j);
+            String::new()
+        }
+        Err(e) => e,
     }
+}
 
-    match result {
-        Ok(r) => {
+fn progress_err(e: &str, tries: u64) -> SpawnProgress {
+    SpawnProgress {
+        done: true,
+        ok: false,
+        error: e.into(),
+        tries: tries as i32,
+        comet: SharedString::new(),
+        commit_txid: SharedString::new(),
+        reveal_txid: SharedString::new(),
+        boot_command: SharedString::new(),
+    }
+}
+
+/// Mine one batch. On a hit, stashes the raw txs on the draft for the QRs and
+/// reports the outcome; otherwise reports progress so the UI's Timer calls again.
+fn spawn_step(
+    job: &Rc<RefCell<Option<urb::spawn::SpawnJob>>>,
+    draft: &Rc<RefCell<DraftState>>,
+) -> SpawnProgress {
+    const BATCH: u64 = 3000;
+    let mut jb = job.borrow_mut();
+    let (outcome, tries) = match jb.as_mut() {
+        Some(j) => (j.step(BATCH), j.tries),
+        None => return progress_err("Spawn not started.", 0),
+    };
+    match outcome {
+        urb::spawn::SpawnStep::Working => SpawnProgress {
+            done: false,
+            ok: false,
+            error: SharedString::new(),
+            tries: tries as i32,
+            comet: SharedString::new(),
+            commit_txid: SharedString::new(),
+            reveal_txid: SharedString::new(),
+            boot_command: SharedString::new(),
+        },
+        urb::spawn::SpawnStep::Done(r) => {
+            *jb = None;
             {
                 let mut d = draft.borrow_mut();
-                d.commit_hex = r.commit_raw_hex;
-                d.reveal_hex = r.reveal_raw_hex;
+                d.commit_hex = r.commit_raw_hex.clone();
+                d.reveal_hex = r.reveal_raw_hex.clone();
                 d.comet = r.comet_patp.clone();
             }
-            SpawnOutcome {
+            SpawnProgress {
+                done: true,
                 ok: true,
                 error: SharedString::new(),
+                tries: tries as i32,
                 comet: r.comet_patp.into(),
                 commit_txid: r.commit_txid_display.into(),
                 reveal_txid: r.reveal_txid_display.into(),
                 boot_command: r.boot_command.into(),
             }
         }
-        Err(e) => err(&e),
+        urb::spawn::SpawnStep::Failed(e) => {
+            *jb = None;
+            progress_err(&e, tries)
+        }
+    }
+}
+
+/// Rebuild the draft for a paused identity (decode its mnemonic back to the seed,
+/// reload any funding UTXO) and report where the wizard should resume.
+fn load_identity(
+    draft: &Rc<RefCell<DraftState>>,
+    ids: &Rc<RefCell<Vec<store::Identity>>>,
+    index: i32,
+) -> ResumeInfo {
+    let none = || ResumeInfo {
+        ok: false,
+        step: 0,
+        index: -1,
+        draft: IdentityDraft { funding_address: SharedString::new(), mnemonic: SharedString::new() },
+    };
+    if index < 0 {
+        return none();
+    }
+    let idl = ids.borrow();
+    let Some(it) = idl.get(index as usize) else { return none() };
+    let Some(entropy) = bip39::from_mnemonic(&it.mnemonic).filter(|e| e.len() == 16) else {
+        return none();
+    };
+    let funding = if it.funding.is_empty() {
+        None
+    } else {
+        urb::spawn::parse_funding(&it.funding).ok()
+    };
+    // stage 2 (funded) resumes at the mine step; anything earlier at fund.
+    let step = if it.stage >= store::stage::FUNDED && funding.is_some() { 6 } else { 4 };
+    let (address, mnemonic) = (it.address.clone(), it.mnemonic.clone());
+    *draft.borrow_mut() = DraftState {
+        entropy,
+        salt: salt_from(&address),
+        mnemonic: mnemonic.clone(),
+        address: address.clone(),
+        funding,
+        ..Default::default()
+    };
+    ResumeInfo {
+        ok: true,
+        step,
+        index,
+        draft: IdentityDraft { funding_address: address.into(), mnemonic: mnemonic.into() },
     }
 }
 
@@ -341,6 +459,7 @@ fn summaries(items: &[store::Identity]) -> Vec<IdentitySummary> {
             label: it.label.clone().into(),
             address: it.address.clone().into(),
             stage: it.stage as i32,
+            comet: it.comet.clone().into(),
         })
         .collect()
 }

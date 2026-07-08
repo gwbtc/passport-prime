@@ -11,7 +11,8 @@ export struct IdentityDraft {
 export struct IdentitySummary {
     label: string,
     address: string,
-    stage: int,
+    stage: int,   // src/store.rs::stage — 1 backed-up · 2 funded · 5 attested · 6 live
+    comet: string, // @p once attested, else ""
 }
 
 // Result of the on-device spawn (mine + build + sign).
@@ -24,9 +25,35 @@ export struct SpawnOutcome {
     boot-command: string, // vere -G one-liner
 }
 
+// One batch of the chunked mine (spawn-step). `done` flips true on success or
+// terminal error; until then `tries` climbs so the UI can show progress.
+export struct SpawnProgress {
+    done: bool,
+    ok: bool,
+    error: string,
+    tries: int,
+    comet: string,
+    commit-txid: string,
+    reveal-txid: string,
+    boot-command: string,
+}
+
+// Where a resumed onboarding should re-enter the wizard.
+export struct ResumeInfo {
+    ok: bool,
+    step: int,          // wizard step to resume at
+    index: int,         // index into `identities`
+    draft: IdentityDraft,
+}
+
 export global GwBridge {
     // Persisted identities, populated by Rust on startup and after changes.
     in-out property <[IdentitySummary]> identities;
+
+    // Resume hand-off: the main page fills this from `load-identity` before
+    // navigating to the create page, which consumes it in `init` (Navigate
+    // carries no params). `ok == false` means "start a fresh wizard".
+    in-out property <ResumeInfo> pending-resume;
 
     // Dice rolls collected toward the current ticket's entropy (50 = 128-bit floor).
     in-out property <int> roll-count;
@@ -61,10 +88,19 @@ export global GwBridge {
     callback scan-funding() -> string;
     callback set-funding(string) -> string;
 
-    // Run the whole on-device spawn: mine the comet, build + sign commit+reveal.
-    // Slow (mining). Returns the outcome; on success the raw txs are held in Rust
-    // for the broadcast QRs below.
-    callback run-spawn() -> SpawnOutcome;
+    // Chunked on-device spawn so mining never blocks the UI. `spawn-begin`
+    // initialises the job from the draft (returns "" or an error); the UI then
+    // calls `spawn-step` from a Timer each frame to mine one batch until
+    // `progress.done`. On success the raw txs are held in Rust for the QRs below.
+    callback spawn-begin() -> string;
+    callback spawn-step() -> SpawnProgress;
+
+    // Persist the funding UTXO onto the in-progress identity (stage = funded), so
+    // a paused onboarding can resume at the mine step.
+    callback record-funding(int /* index */);
+
+    // Reconstruct the draft for a paused identity and report where to resume.
+    callback load-identity(int /* index */) -> ResumeInfo;
 
     // QRs of the finalized raw commit / reveal transactions, for broadcast.
     pure callback commit-qr() -> image;

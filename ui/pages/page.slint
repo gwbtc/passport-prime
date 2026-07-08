@@ -7,6 +7,17 @@ import { Cyber, NeonPanel, MonoText } from "../cyber.slint";
 export component MainPagePage inherits Rectangle {
     background: Cyber.page-bg;
 
+    // Index whose delete is awaiting confirmation (-1 = none).
+    property <int> confirm-delete: -1;
+
+    // Human label for a src/store.rs::stage value.
+    function stage-name(s: int) -> string {
+        if (s >= 6) { return "live"; }
+        if (s >= 5) { return "attested — broadcast pending"; }
+        if (s >= 2) { return "funded — ready to mine"; }
+        return "backed up — needs funding";
+    }
+
     VerticalLayout {
         width: parent.width;
         height: parent.height;
@@ -59,7 +70,8 @@ export component MainPagePage inherits Rectangle {
                 padding: 16px;
                 spacing: 6px;
                 MonoText {
-                    text: "~" + id.label;
+                    // Comet @p once attested; otherwise the address-tail label.
+                    text: id.comet != "" ? id.comet : "id " + id.label;
                     color: Cyber.neon;
                     font-size: 18px;
                     font-weight: 700;
@@ -68,6 +80,62 @@ export component MainPagePage inherits Rectangle {
                     text: id.address;
                     color: Theme.palette-muted;
                     font-size: 12px;
+                }
+                MonoText {
+                    text: "// " + stage-name(id.stage);
+                    color: id.stage >= 6 ? Cyber.neon : Theme.palette-muted;
+                    font-size: 12px;
+                    letter-spacing: 1px;
+                }
+
+                // Delete confirmation replaces the action row when armed.
+                if confirm-delete == i: HorizontalLayout {
+                    spacing: 8px;
+                    MonoText {
+                        text: "delete? this erases its backup";
+                        color: Theme.palette-danger;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        size: ButtonSize.sm;
+                        variant: ButtonVariant.ghost;
+                        text: "No";
+                        clicked => { root.confirm-delete = -1; }
+                    }
+                    Button {
+                        size: ButtonSize.sm;
+                        variant: ButtonVariant.danger;
+                        text: "Delete";
+                        clicked => {
+                            GwBridge.delete-identity(i);
+                            root.confirm-delete = -1;
+                        }
+                    }
+                }
+                if confirm-delete != i: HorizontalLayout {
+                    spacing: 8px;
+                    // Resume is only meaningful before attestation.
+                    if id.stage < 5: Button {
+                        size: ButtonSize.sm;
+                        variant: ButtonVariant.primary;
+                        foreground: Cyber.on-neon;
+                        text: "Resume";
+                        horizontal-stretch: 1;
+                        clicked => {
+                            GwBridge.pending-resume = GwBridge.load-identity(i);
+                            if (GwBridge.pending-resume.ok) {
+                                Navigate.create-page({ });
+                            }
+                        }
+                    }
+                    Button {
+                        size: ButtonSize.sm;
+                        variant: ButtonVariant.ghost;
+                        text: "Delete";
+                        clicked => { root.confirm-delete = i; }
+                    }
                 }
             }
         }
@@ -83,6 +151,7 @@ export component MainPagePage inherits Rectangle {
             foreground: Cyber.on-neon;
             text: "+ Create identity";
             clicked => {
+                GwBridge.pending-resume = { ok: false, step: 0, index: -1, draft: { funding-address: "", mnemonic: "" } };
                 GwBridge.reset-entropy();
                 GwBridge.roll-count = 0;
                 Navigate.create-page({ });

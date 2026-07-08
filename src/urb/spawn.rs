@@ -142,6 +142,87 @@ pub fn assemble_spawn(
     })
 }
 
+/// A resumable spawn: the slow star search split into bounded batches so the UI
+/// can mine a chunk per frame and stay responsive (mining ~65k iterations blocks
+/// for minutes on-device if run in one shot). [`SpawnJob::step`] mines up to
+/// `batch` iterations and, once a `~daplyd` comet lands, assembles the signed
+/// commit+reveal in the same call.
+pub struct SpawnJob {
+    seed: Vec<u8>,
+    funding: FundingInput,
+    tweak: Vec<u8>,
+    rng: Box<dyn FnMut(&mut [u8; 64])>,
+    fee_rate: u64,
+    aux_rand: [u8; 32],
+    boot_script_url: String,
+    /// Iterations mined so far — for the progress readout.
+    pub tries: u64,
+    budget: u64,
+}
+
+/// One `step` outcome.
+pub enum SpawnStep {
+    /// Still searching; `tries` on the job has advanced.
+    Working,
+    /// Found and fully signed.
+    Done(Box<SpawnResult>),
+    /// Terminal error: budget exhausted, or the funding UTXO was too small to
+    /// cover the commit+reveal fees.
+    Failed(String),
+}
+
+impl SpawnJob {
+    /// Set up a spawn (compute the tweak); mining happens in [`step`](Self::step).
+    pub fn new(
+        seed: &[u8],
+        funding: FundingInput,
+        fee_rate: u64,
+        rng: impl FnMut(&mut [u8; 64]) + 'static,
+        aux_rand: [u8; 32],
+        boot_script_url: &str,
+    ) -> Result<SpawnJob, String> {
+        let tweak = tweak::build_tweak_bytes(&funding.txid_display_hex, funding.vout as u64, 0)?;
+        Ok(SpawnJob {
+            seed: seed.to_vec(),
+            funding,
+            tweak,
+            rng: Box::new(rng),
+            fee_rate,
+            aux_rand,
+            boot_script_url: boot_script_url.to_string(),
+            tries: 0,
+            budget: 5_000_000,
+        })
+    }
+
+    /// Mine up to `batch` iterations. On a hit, assembles and returns the signed
+    /// transactions; otherwise reports progress so the caller can call again.
+    pub fn step(&mut self, batch: u64) -> SpawnStep {
+        let hit = mine::mine_until(&self.tweak, &mut *self.rng, batch, |s| s == mine::REQUIRED_STAR);
+        match hit {
+            Some(mined) => match assemble_spawn(
+                &self.seed,
+                &self.funding,
+                &mined,
+                self.fee_rate,
+                &self.aux_rand,
+                &self.boot_script_url,
+            ) {
+                Ok(r) => SpawnStep::Done(Box::new(r)),
+                Err(e) => SpawnStep::Failed(e), // assembly only fails on a too-small UTXO
+            },
+            None => {
+                self.tries += batch;
+                if self.tries >= self.budget {
+                    SpawnStep::Failed("mining exhausted its budget".into())
+                } else {
+                    SpawnStep::Working
+                }
+            }
+        }
+    }
+}
+
 /// Mine a `~daplyd` comet bound to the funding sat, then assemble everything.
 /// `rng` must supply CSPRNG bytes; mining is the slow step (~65k iterations).
 pub fn spawn_identity(

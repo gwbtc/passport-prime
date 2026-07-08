@@ -1,7 +1,8 @@
 import { Theme, UISize, ButtonSize, ButtonVariant } from "@ui/theme.slint";
 import { Button } from "@ui/button.slint";
+import { Input } from "@ui/input.slint";
 import { Navigate } from "../../gen/navigate.slint";
-import { GwBridge, IdentityDraft, SpawnOutcome } from "../../gw-bridge.slint";
+import { GwBridge, IdentityDraft, SpawnOutcome, SpawnProgress } from "../../gw-bridge.slint";
 import { Cyber, NeonPanel, MonoText } from "../../cyber.slint";
 
 // On-device onboarding wizard (Architecture B). One component, a `step` property
@@ -20,27 +21,79 @@ export component CreatePagePage inherits Rectangle {
     property <bool> quiz-error: false;
     // Index of the persisted identity, once the backup proof passes.
     property <int> saved-index: -1;
-    // Funding-UTXO scan/entry result ("" = ok) and whether one is loaded.
+    // Funding-UTXO entry: the typed/scanned "txid:vout:sats", the last error
+    // ("" = ok), and whether one is loaded.
+    property <string> funding-text: "";
     property <string> funding-msg: "";
     property <bool> funding-ready: false;
-    // Result of the on-device spawn.
+    // Result of the on-device spawn, plus the live mine state.
     property <SpawnOutcome> outcome;
     property <bool> spawning: false;
+    property <int> spawn-tries: 0;
+    property <string> mine-error: "";
+    // Latest mine batch result (assigned then read within one Timer tick).
+    property <SpawnProgress> prog;
 
+    // Clear the transient wizard state without touching a loaded draft.
+    function reset-flow() {
+        root.quiz-pos = 0;
+        root.quiz-error = false;
+        root.funding-text = "";
+        root.funding-msg = "";
+        root.funding-ready = false;
+        root.spawning = false;
+        root.spawn-tries = 0;
+        root.mine-error = "";
+    }
+
+    // Full reset for a fresh ticket (also wipes the Rust-side draft + dice pool).
     function reset-wizard() {
         GwBridge.reset-entropy();
         GwBridge.roll-count = 0;
         root.step = 1;
-        root.quiz-pos = 0;
-        root.quiz-error = false;
         root.saved-index = -1;
-        root.funding-msg = "";
-        root.funding-ready = false;
-        root.spawning = false;
+        reset-flow();
+    }
+
+    // Chunked miner: one batch per tick while the mine step is spawning, so the
+    // UI keeps repainting and Cancel stays responsive. Slint forbids a Timer in
+    // an `if`, so it lives at component scope and self-gates via `running`.
+    mine-timer := Timer {
+        interval: 1ms;
+        running: root.step == 6 && root.spawning;
+        triggered => {
+            root.prog = GwBridge.spawn-step();
+            root.spawn-tries = root.prog.tries;
+            if (root.prog.done) {
+                root.spawning = false;
+                if (root.prog.ok) {
+                    root.outcome = {
+                        ok: true,
+                        error: "",
+                        comet: root.prog.comet,
+                        commit-txid: root.prog.commit-txid,
+                        reveal-txid: root.prog.reveal-txid,
+                        boot-command: root.prog.boot-command,
+                    };
+                    root.step = 7;
+                } else {
+                    root.mine-error = root.prog.error;
+                }
+            }
+        }
     }
 
     init => {
-        reset-wizard();
+        if (GwBridge.pending-resume.ok) {
+            // Resuming a paused identity: the draft is already rebuilt in Rust.
+            root.draft = GwBridge.pending-resume.draft;
+            root.saved-index = GwBridge.pending-resume.index;
+            root.step = GwBridge.pending-resume.step;
+            reset-flow();
+            GwBridge.pending-resume = { ok: false, step: 0, index: -1, draft: { funding-address: "", mnemonic: "" } };
+        } else {
+            reset-wizard();
+        }
     }
 
     VerticalLayout {
@@ -279,30 +332,50 @@ export component CreatePagePage inherits Rectangle {
             clicked => { root.funding-msg = ""; root.funding-ready = false; root.step = 5; }
         }
 
-        // ---- Step 5: scan the funding UTXO -----------------------------
+        // ---- Step 5: enter the funding UTXO ----------------------------
         if step == 5: MonoText {
-            text: "> scan the funding UTXO";
+            text: "> enter the funding UTXO";
             color: Cyber.neon;
             font-size: 22px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 5: Text {
-            text: "Find your payment on a block explorer (mempool.space). Scan a QR of `txid:vout:sats` for the output that paid this address.";
+            text: "Find your payment on a block explorer (mempool.space). Type the output that paid this address as `txid:vout:sats`, or scan a QR of the same.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 14px;
             wrap: word-wrap;
+        }
+        if step == 5: Input {
+            width: 100%;
+            value <=> root.funding-text;
+            placeholder: "txid:vout:sats";
         }
         if step == 5: Button {
             width: 100%;
             size: ButtonSize.lg;
             variant: ButtonVariant.primary;
             foreground: Cyber.on-neon;
-            text: "Scan funding QR";
+            text: "Continue";
+            clicked => {
+                root.funding-msg = GwBridge.set-funding(root.funding-text);
+                if (root.funding-msg == "") {
+                    GwBridge.record-funding(root.saved-index);
+                    root.funding-ready = true;
+                    root.step = 6;
+                }
+            }
+        }
+        if step == 5: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Scan QR instead";
             clicked => {
                 root.funding-msg = GwBridge.scan-funding();
                 if (root.funding-msg == "") {
+                    GwBridge.record-funding(root.saved-index);
                     root.funding-ready = true;
                     root.step = 6;
                 }
@@ -344,12 +417,18 @@ export component CreatePagePage inherits Rectangle {
             font-size: 13px;
             wrap: word-wrap;
         }
-        if step == 6 && outcome.error != "": NeonPanel {
+        if step == 6 && spawning: MonoText {
+            text: "mining… \{spawn-tries} tries — keep the Passport awake";
+            color: Cyber.neon;
+            font-size: 14px;
+            letter-spacing: 1px;
+        }
+        if step == 6 && mine-error != "": NeonPanel {
             accent: Theme.palette-danger;
             VerticalLayout {
                 padding: 12px;
                 MonoText {
-                    text: "! " + outcome.error;
+                    text: "! " + mine-error;
                     color: Theme.palette-danger;
                     font-size: 13px;
                     font-weight: 600;
@@ -357,18 +436,26 @@ export component CreatePagePage inherits Rectangle {
             }
         }
         if step == 6: Rectangle { vertical-stretch: 1; }
-        if step == 6: Button {
+        if step == 6 && !spawning: Button {
             width: 100%;
             size: ButtonSize.lg;
             variant: ButtonVariant.primary;
             foreground: Cyber.on-neon;
             text: "Mine & sign on this Passport";
             clicked => {
-                root.outcome = GwBridge.run-spawn();
-                if (root.outcome.ok) {
-                    root.step = 7;
+                root.mine-error = GwBridge.spawn-begin();
+                if (root.mine-error == "") {
+                    root.spawn-tries = 0;
+                    root.spawning = true;
                 }
             }
+        }
+        if step == 6 && spawning: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Cancel";
+            clicked => { root.spawning = false; }
         }
 
         // ---- Step 7: broadcast (commit, then reveal) -------------------

@@ -22,7 +22,14 @@ const FILE: &str = "identities.json";
 /// literals in Slint, so only the two Rust touches are named here.
 pub mod stage {
     pub const BACKED_UP: u8 = 1; // paper proven by the quiz; persisted here
+    pub const FUNDED: u8 = 2; // funding UTXO entered; ready to mine + sign
     pub const ATTESTED: u8 = 5; // commit+reveal on-chain — never re-run
+    pub const LIVE: u8 = 6; // comet booted
+
+    /// An identity still mid-onboarding (can be resumed or deleted).
+    pub fn in_progress(s: u8) -> bool {
+        s < ATTESTED
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -37,6 +44,10 @@ pub struct Identity {
     /// Onboarding stage; see [`stage`].
     #[serde(default)]
     pub stage: u8,
+    /// The scanned/typed funding UTXO (`txid:vout:sats`), persisted so a paused
+    /// onboarding can resume straight to the mine step. Empty until funded.
+    #[serde(default)]
+    pub funding: String,
     /// Comet name (@p), recorded at attestation. Provisional until `stage >= ATTESTED`.
     #[serde(default)]
     pub comet: String,
