@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>urb/ core — wasm parity</title>
+<body style="font:14px/1.6 ui-monospace,Menlo,monospace;background:#0b0f14;color:#c8f9d4;margin:0;padding:28px">
+  <h1 style="color:#39ff14;letter-spacing:2px;font-size:20px">▸ urb/ protocol core — running in WebAssembly</h1>
+  <p style="color:#6b7a72">The Passport's exact <code>src/urb/</code> source, compiled to wasm32 and reproducing the device's golden vectors in your browser.</p>
+  <pre id="out" style="background:#0f1620;border:1px solid #1d2b22;border-radius:8px;padding:16px;white-space:pre-wrap">loading…</pre>
+  <script type="module">
+    // No wasm-bindgen: instantiate the raw cdylib and read the report string
+    // back from linear memory via the (ptr<<32)|len the ABI returns.
+    const bytes = await (await fetch('./urb_wasm.wasm')).arrayBuffer();
+    const { instance } = await WebAssembly.instantiate(bytes, {});
+    const packed = instance.exports.self_test();               // BigInt (u64)
+    const ptr = Number(packed >> 32n), len = Number(packed & 0xffffffffn);
+    const view = new Uint8Array(instance.exports.memory.buffer, ptr, len);
+    document.getElementById('out').textContent = new TextDecoder().decode(view);
+  </script>
+</body>
