@@ -109,7 +109,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 1: MonoText {
             text: "> roll the dice";
             color: Cyber.neon;
-            font-size: 24px;
+            font-size: 34px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -117,7 +117,7 @@ export component CreatePagePage inherits Rectangle {
             text: "Roll a physical die and tap each result. 50 rolls = 128 bits — the dice, not the device, are your randomness. Nothing leaves this Passport.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 14px;
+            font-size: 22px;
             wrap: word-wrap;
         }
         if step == 1: HorizontalLayout {
@@ -133,7 +133,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 1: MonoText {
             text: "rolls  \{GwBridge.roll-count} / 50";
             color: GwBridge.roll-count >= 50 ? Cyber.neon : Theme.palette-muted;
-            font-size: 14px;
+            font-size: 22px;
             letter-spacing: 1px;
         }
         if step == 1: Rectangle {
@@ -171,7 +171,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 2: MonoText {
             text: "> write it down";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -179,7 +179,7 @@ export component CreatePagePage inherits Rectangle {
             text: "Write these 12 words on paper, in order. This is both your ship login and your Bitcoin wallet — one secret. Lose it and it is gone forever. Press and hold each row to reveal one word. Do not photograph the screen.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
-            font-size: 13px;
+            font-size: 21px;
             wrap: word-wrap;
         }
         if step == 2: VerticalLayout {
@@ -198,14 +198,14 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: "\{i + 1}";
                     color: Cyber.neon;
-                    font-size: 14px;
+                    font-size: 22px;
                     vertical-alignment: center;
                     width: 24px;
                 }
                 MonoText {
                     text: hold.pressed ? word : "•••• hold to reveal";
                     color: hold.pressed ? Theme.palette-foreground : Theme.palette-muted;
-                    font-size: 15px;
+                    font-size: 24px;
                     font-weight: hold.pressed ? 700 : 400;
                     vertical-alignment: center;
                 }
@@ -230,7 +230,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 3: MonoText {
             text: "> prove your paper";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -238,13 +238,13 @@ export component CreatePagePage inherits Rectangle {
             text: "Reading only from your paper, tap each word in order. This proves your copy is correct before any Bitcoin exists.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 14px;
+            font-size: 22px;
             wrap: word-wrap;
         }
         if step == 3: MonoText {
             text: "word  \{quiz-pos + 1} / 12";
             color: Cyber.neon;
-            font-size: 14px;
+            font-size: 22px;
             letter-spacing: 1px;
         }
         if step == 3: VerticalLayout {
@@ -281,7 +281,7 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: "! That doesn't match your paper. Start over, reading each word carefully.";
                     color: Theme.palette-danger;
-                    font-size: 13px;
+                    font-size: 21px;
                     font-weight: 600;
                 }
             }
@@ -291,7 +291,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 4: MonoText {
             text: "> fund the address";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -299,7 +299,7 @@ export component CreatePagePage inherits Rectangle {
             text: "Send Bitcoin to this address — it funds and inscribes your comet. One payment; a few thousand sats plus fees is plenty.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 14px;
+            font-size: 22px;
             wrap: word-wrap;
         }
         if step == 4: HorizontalLayout {
@@ -317,7 +317,7 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: draft.funding-address;
                     color: Theme.palette-foreground;
-                    font-size: 13px;
+                    font-size: 21px;
                     wrap: word-wrap;
                 }
             }
@@ -336,7 +336,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 5: MonoText {
             text: "> enter the funding UTXO";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -344,7 +344,7 @@ export component CreatePagePage inherits Rectangle {
             text: "Find your payment on a block explorer (mempool.space). Type the output that paid this address as `txid:vout:sats`, or scan a QR of the same.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 14px;
+            font-size: 22px;
             wrap: word-wrap;
         }
         if step == 5: Input {
@@ -388,7 +388,7 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: "! " + funding-msg;
                     color: Theme.palette-danger;
-                    font-size: 13px;
+                    font-size: 21px;
                     font-weight: 600;
                 }
             }
@@ -406,7 +406,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 6: MonoText {
             text: "> mine & sign";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -414,13 +414,13 @@ export component CreatePagePage inherits Rectangle {
             text: "This Passport now mines your comet's networking key and signs the commit + reveal transactions on-device. Your key never leaves. Mining can take a few minutes — keep the Passport awake.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 13px;
+            font-size: 21px;
             wrap: word-wrap;
         }
         if step == 6 && spawning: MonoText {
             text: "mining… \{spawn-tries} tries — keep the Passport awake";
             color: Cyber.neon;
-            font-size: 14px;
+            font-size: 22px;
             letter-spacing: 1px;
         }
         if step == 6 && mine-error != "": NeonPanel {
@@ -430,7 +430,7 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: "! " + mine-error;
                     color: Theme.palette-danger;
-                    font-size: 13px;
+                    font-size: 21px;
                     font-weight: 600;
                 }
             }
@@ -462,33 +462,33 @@ export component CreatePagePage inherits Rectangle {
         if step == 7: MonoText {
             text: "> broadcast";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 7: MonoText {
             text: "comet: " + outcome.comet;
             color: Cyber.neon;
-            font-size: 15px;
+            font-size: 24px;
             wrap: word-wrap;
         }
         if step == 7: Text {
             text: "Broadcast COMMIT first (push the raw tx on mempool.space). Wait for it to confirm, THEN broadcast REVEAL. Never re-run after commit.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
-            font-size: 13px;
+            font-size: 21px;
             wrap: word-wrap;
         }
         if step == 7: HorizontalLayout {
             spacing: 10px;
             VerticalLayout {
                 spacing: 4px;
-                MonoText { text: "commit"; color: Cyber.neon; font-size: 12px; }
+                MonoText { text: "commit"; color: Cyber.neon; font-size: 19px; }
                 Image { source: GwBridge.commit-qr(); width: 150px; height: 150px; image-fit: contain; }
             }
             VerticalLayout {
                 spacing: 4px;
-                MonoText { text: "reveal"; color: Cyber.neon; font-size: 12px; }
+                MonoText { text: "reveal"; color: Cyber.neon; font-size: 19px; }
                 Image { source: GwBridge.reveal-qr(); width: 150px; height: 150px; image-fit: contain; }
             }
         }
@@ -509,7 +509,7 @@ export component CreatePagePage inherits Rectangle {
         if step == 8: MonoText {
             text: "> go live";
             color: Cyber.neon;
-            font-size: 22px;
+            font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
@@ -517,7 +517,7 @@ export component CreatePagePage inherits Rectangle {
             text: "Once the reveal confirms, run this on your computer to install the runtime and boot your comet. Keep your paper — this Passport holds an encrypted copy; wipe this app before giving the device away.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 13px;
+            font-size: 21px;
             wrap: word-wrap;
         }
         // The boot command embeds your comet's private networking key (in --feed).
@@ -526,7 +526,7 @@ export component CreatePagePage inherits Rectangle {
             text: "This command contains your comet's private networking key. Keep it private — do not photograph the screen or paste it anywhere public.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
-            font-size: 13px;
+            font-size: 21px;
             wrap: word-wrap;
         }
         if step == 8: NeonPanel {
@@ -536,7 +536,7 @@ export component CreatePagePage inherits Rectangle {
                 MonoText {
                     text: "// boot your comet — secret";
                     color: Cyber.neon;
-                    font-size: 12px;
+                    font-size: 19px;
                     letter-spacing: 1px;
                 }
                 Rectangle {
@@ -545,13 +545,13 @@ export component CreatePagePage inherits Rectangle {
                     if boothold.pressed: MonoText {
                         text: outcome.boot-command;
                         color: Theme.palette-foreground;
-                        font-size: 12px;
+                        font-size: 19px;
                         wrap: word-wrap;
                     }
                     if !boothold.pressed: MonoText {
                         text: "•••• press and hold to reveal — make sure no other camera can see this screen";
                         color: Theme.palette-muted;
-                        font-size: 12px;
+                        font-size: 19px;
                         wrap: word-wrap;
                     }
                 }

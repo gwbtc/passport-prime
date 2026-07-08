@@ -30,7 +30,7 @@ export component MainPagePage inherits Rectangle {
         MonoText {
             text: "> groundwire";
             color: Cyber.neon;
-            font-size: 26px;
+            font-size: 36px;
             font-weight: 700;
             letter-spacing: 2px;
             horizontal-alignment: left;
@@ -40,7 +40,7 @@ export component MainPagePage inherits Rectangle {
             text: "Spawn and manage Groundwire identities on your Passport.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
-            font-size: 15px;
+            font-size: 24px;
             font-weight: 500;
             wrap: word-wrap;
         }
@@ -53,13 +53,13 @@ export component MainPagePage inherits Rectangle {
                 MonoText {
                     text: "// no identities";
                     color: Cyber.neon;
-                    font-size: 16px;
+                    font-size: 26px;
                 }
                 Text {
                     text: "Create one to get started — your master ticket is generated and stored on the Passport.";
                     color: Theme.palette-muted;
                     font-family: "Montserrat";
-                    font-size: 14px;
+                    font-size: 22px;
                     wrap: word-wrap;
                 }
             }
@@ -73,18 +73,18 @@ export component MainPagePage inherits Rectangle {
                     // Comet @p once attested; otherwise the address-tail label.
                     text: id.comet != "" ? id.comet : "id " + id.label;
                     color: Cyber.neon;
-                    font-size: 18px;
+                    font-size: 28px;
                     font-weight: 700;
                 }
                 MonoText {
                     text: id.address;
                     color: Theme.palette-muted;
-                    font-size: 12px;
+                    font-size: 19px;
                 }
                 MonoText {
                     text: "// " + stage-name(id.stage);
                     color: id.stage >= 6 ? Cyber.neon : Theme.palette-muted;
-                    font-size: 12px;
+                    font-size: 19px;
                     letter-spacing: 1px;
                 }
 
@@ -94,7 +94,7 @@ export component MainPagePage inherits Rectangle {
                     MonoText {
                         text: "delete? this erases its backup";
                         color: Theme.palette-danger;
-                        font-size: 12px;
+                        font-size: 19px;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
