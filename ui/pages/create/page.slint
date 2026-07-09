@@ -33,6 +33,11 @@ export component CreatePagePage inherits Rectangle {
     property <string> mine-error: "";
     // Latest mine batch result (assigned then read within one Timer tick).
     property <SpawnProgress> prog;
+    // Step 2: a single tap toggles reveal for ALL 12 words; re-hidden on entry.
+    property <bool> words-shown: false;
+    // Snapshot of the draft's 12 words, indexed into the two-column grid. Set
+    // when the draft is created/resumed (mnemonic-words() reads the Rust draft).
+    property <[string]> words;
 
     // Clear the transient wizard state without touching a loaded draft.
     function reset-flow() {
@@ -44,6 +49,7 @@ export component CreatePagePage inherits Rectangle {
         root.spawning = false;
         root.spawn-tries = 0;
         root.mine-error = "";
+        root.words-shown = false;
     }
 
     // Full reset for a fresh ticket (also wipes the Rust-side draft + dice pool).
@@ -87,6 +93,7 @@ export component CreatePagePage inherits Rectangle {
         if (GwBridge.pending-resume.ok) {
             // Resuming a paused identity: the draft is already rebuilt in Rust.
             root.draft = GwBridge.pending-resume.draft;
+            root.words = GwBridge.mnemonic-words();
             root.saved-index = GwBridge.pending-resume.index;
             root.step = GwBridge.pending-resume.step;
             reset-flow();
@@ -107,14 +114,14 @@ export component CreatePagePage inherits Rectangle {
 
         // ---- Step 1: dice -> mint ticket -------------------------------
         if step == 1: MonoText {
-            text: "> roll the dice";
+            text: "⏚ roll the dice";
             color: Cyber.neon;
             font-size: 34px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 1: Text {
-            text: "Roll a physical die and tap each result. 50 rolls = 128 bits — the dice, not the device, are your randomness. Nothing leaves this Passport.";
+            text: "Roll a physical die and tap each result. 50 rolls = 128 bits.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 22px;
@@ -162,54 +169,75 @@ export component CreatePagePage inherits Rectangle {
             clicked => {
                 if (GwBridge.roll-count >= 50) {
                     root.draft = GwBridge.generate-identity();
+                    root.words = GwBridge.mnemonic-words();
+                    root.words-shown = false;
                     root.step = 2;
                 }
             }
         }
 
-        // ---- Step 2: write it down (press-and-hold reveal) -------------
+        // ---- Step 2: write it down (tap to reveal all 12) --------------
         if step == 2: MonoText {
-            text: "> write it down";
+            text: "⏚ write it down";
             color: Cyber.neon;
-            font-size: 32px;
+            font-size: 34px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 2: Text {
-            text: "Write these 12 words on paper, in order. This is both your ship login and your Bitcoin wallet — one secret. Lose it and it is gone forever. Press and hold each row to reveal one word. Do not photograph the screen.";
+            text: "Write these 12 words on paper, in order. Lose them and this identity is gone forever. Do not photograph the screen.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
-            font-size: 21px;
+            font-size: 22px;
             wrap: word-wrap;
         }
-        if step == 2: VerticalLayout {
-            spacing: 6px;
-            for word[i] in GwBridge.mnemonic-words(): Rectangle {
-            height: 34px;
-            border-radius: 6px;
-            background: Theme.palette-surface;
+        if step == 2: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            // Force a persistent border; the ghost variant only borders on focus.
+            border-color: Cyber.neon.with-alpha(0.55);
             border-width: 1px;
-            border-color: Cyber.neon.with-alpha(0.35);
-            hold := TouchArea { }
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                spacing: 10px;
-                MonoText {
-                    text: "\{i + 1}";
-                    color: Cyber.neon;
-                    font-size: 22px;
-                    vertical-alignment: center;
-                    width: 24px;
+            text: root.words-shown ? "Hide words" : "Tap to reveal all 12 words";
+            clicked => { root.words-shown = !root.words-shown; }
+        }
+        // Two numbered columns (1-6 | 7-12) so the rows can be big enough to hit
+        // reliably on the device; the number column is wide enough for 2 digits.
+        // Six rows, each holding the left word r and the right word r+6 — Slint
+        // forbids `for` inside a GridLayout, so we pair cells per row instead.
+        if step == 2: VerticalLayout {
+            spacing: 8px;
+            for r in [0, 1, 2, 3, 4, 5]: HorizontalLayout {
+                spacing: 8px;
+                for c in [0, 1]: Rectangle {
+                    property <int> n: r + (c == 0 ? 0 : 6);
+                    horizontal-stretch: 1;
+                    height: 50px;
+                    border-radius: 6px;
+                    background: Theme.palette-surface;
+                    border-width: 1px;
+                    border-color: Cyber.neon.with-alpha(0.35);
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 10px;
+                        MonoText {
+                            text: "\{n + 1}";
+                            color: Cyber.neon;
+                            font-size: 26px;
+                            vertical-alignment: center;
+                            horizontal-alignment: right;
+                            width: 40px;
+                        }
+                        MonoText {
+                            text: root.words-shown ? root.words[n] : "••••";
+                            color: root.words-shown ? Theme.palette-foreground : Theme.palette-muted;
+                            font-size: 30px;
+                            font-weight: root.words-shown ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                    }
                 }
-                MonoText {
-                    text: hold.pressed ? word : "•••• hold to reveal";
-                    color: hold.pressed ? Theme.palette-foreground : Theme.palette-muted;
-                    font-size: 24px;
-                    font-weight: hold.pressed ? 700 : 400;
-                    vertical-alignment: center;
-                }
-            }
             }
         }
         if step == 2: Button {
@@ -225,17 +253,24 @@ export component CreatePagePage inherits Rectangle {
                 root.step = 3;
             }
         }
+        if step == 2: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Back";
+            clicked => { root.step = 1; }
+        }
 
         // ---- Step 3: prove the paper (quiz) ----------------------------
         if step == 3: MonoText {
-            text: "> prove your paper";
+            text: "⏚ prove your paper";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 3: Text {
-            text: "Reading only from your paper, tap each word in order. This proves your copy is correct before any Bitcoin exists.";
+            text: "Reading only from your paper, tap each word in order.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 22px;
@@ -286,17 +321,30 @@ export component CreatePagePage inherits Rectangle {
                 }
             }
         }
+        if step == 3: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Back";
+            clicked => {
+                GwBridge.backup-reset();
+                root.quiz-pos = 0;
+                root.quiz-error = false;
+                root.words-shown = false;
+                root.step = 2;
+            }
+        }
 
         // ---- Step 4: fund the address ----------------------------------
         if step == 4: MonoText {
-            text: "> fund the address";
+            text: "⏚ fund the address";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 4: Text {
-            text: "Send Bitcoin to this address — it funds and inscribes your comet. One payment; a few thousand sats plus fees is plenty.";
+            text: "Send Bitcoin to this address. A few thousand sats plus fees, in one payment.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 22px;
@@ -331,17 +379,29 @@ export component CreatePagePage inherits Rectangle {
             text: "I've sent the payment";
             clicked => { root.funding-msg = ""; root.funding-ready = false; root.step = 5; }
         }
+        if step == 4: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Back";
+            clicked => {
+                GwBridge.backup-reset();
+                root.quiz-pos = 0;
+                root.quiz-error = false;
+                root.step = 3;
+            }
+        }
 
         // ---- Step 5: enter the funding UTXO ----------------------------
         if step == 5: MonoText {
-            text: "> enter the funding UTXO";
+            text: "⏚ enter the funding UTXO";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 5: Text {
-            text: "Find your payment on a block explorer (mempool.space). Type the output that paid this address as `txid:vout:sats`, or scan a QR of the same.";
+            text: "Find your payment on mempool.space. Enter the output as `txid:vout:sats`, or scan a QR.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 22px;
@@ -404,14 +464,14 @@ export component CreatePagePage inherits Rectangle {
 
         // ---- Step 6: mine + sign on device -----------------------------
         if step == 6: MonoText {
-            text: "> mine & sign";
+            text: "⏚ mine & sign";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 6: Text {
-            text: "This Passport now mines your comet's networking key and signs the commit + reveal transactions on-device. Your key never leaves. Mining can take a few minutes — keep the Passport awake.";
+            text: "Mines and signs the commit + reveal on this Passport. Keep it awake; this can take a few minutes.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 21px;
@@ -457,10 +517,17 @@ export component CreatePagePage inherits Rectangle {
             text: "Cancel";
             clicked => { root.spawning = false; }
         }
+        if step == 6 && !spawning: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "Back";
+            clicked => { root.step = 5; }
+        }
 
         // ---- Step 7: broadcast (commit, then reveal) -------------------
         if step == 7: MonoText {
-            text: "> broadcast";
+            text: "⏚ broadcast";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
@@ -473,7 +540,7 @@ export component CreatePagePage inherits Rectangle {
             wrap: word-wrap;
         }
         if step == 7: Text {
-            text: "Broadcast COMMIT first (push the raw tx on mempool.space). Wait for it to confirm, THEN broadcast REVEAL. Never re-run after commit.";
+            text: "Broadcast COMMIT first on mempool.space. Wait for it to confirm, then broadcast REVEAL. Never re-run after commit.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
             font-size: 21px;
@@ -507,14 +574,14 @@ export component CreatePagePage inherits Rectangle {
 
         // ---- Step 8: boot / live ---------------------------------------
         if step == 8: MonoText {
-            text: "> go live";
+            text: "⏚ go live";
             color: Cyber.neon;
             font-size: 32px;
             font-weight: 700;
             letter-spacing: 2px;
         }
         if step == 8: Text {
-            text: "Once the reveal confirms, run this on your computer to install the runtime and boot your comet. Keep your paper — this Passport holds an encrypted copy; wipe this app before giving the device away.";
+            text: "After the reveal confirms, run this on your computer to boot your comet. Keep your paper. Wipe this app before giving the device away.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 21px;
@@ -523,7 +590,7 @@ export component CreatePagePage inherits Rectangle {
         // The boot command embeds your comet's private networking key (in --feed).
         // Treat it like a secret: hold to reveal, and don't let another camera see it.
         if step == 8: Text {
-            text: "This command contains your comet's private networking key. Keep it private — do not photograph the screen or paste it anywhere public.";
+            text: "This command contains your comet's private key. Do not photograph the screen or paste it publicly.";
             color: Theme.palette-danger;
             font-family: "Montserrat";
             font-size: 21px;
@@ -571,8 +638,8 @@ export component CreatePagePage inherits Rectangle {
             }
         }
 
-        // ---- Cancel (pre-persist steps only) ---------------------------
-        if step <= 2: Button {
+        // ---- Cancel (step 1 only; later steps have their own Back) ------
+        if step == 1: Button {
             width: 100%;
             size: ButtonSize.md;
             variant: ButtonVariant.ghost;
