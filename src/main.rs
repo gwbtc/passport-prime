@@ -130,32 +130,6 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         }
     });
 
-    // TEST ONLY: jump straight to the mine step with a fixed seed + dummy funding,
-    // so mining UI/perf can be exercised without dice/quiz/funding. Gated to debug
-    // builds via `dev-mode`; the button is hidden and this never persists anything.
-    ui.global::<GwBridge>().set_dev_mode(cfg!(debug_assertions));
-    let dr = draft.clone();
-    ui.global::<GwBridge>().on_dev_jump_to_mine(move || {
-        let ent = [0x11u8; 16];
-        let d = identity::new_identity(ent);
-        *dr.borrow_mut() = DraftState {
-            entropy: ent.to_vec(),
-            salt: 0,
-            mnemonic: d.mnemonic,
-            address: d.funding_address,
-            quiz: Vec::new(),
-            funding: Some(urb::spawn::FundingInput {
-                txid_display_hex: "11".repeat(32),
-                vout: 0,
-                value: 100_000,
-            }),
-            commit_hex: String::new(),
-            reveal_hex: String::new(),
-            comet: String::new(),
-            feed_uw: String::new(),
-        };
-    });
-
     // The draft's 12 words, for the write-down grid.
     let dr = draft.clone();
     ui.global::<GwBridge>().on_mnemonic_words(move || {

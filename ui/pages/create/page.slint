@@ -190,17 +190,6 @@ export component CreatePagePage inherits Rectangle {
                 }
             }
         }
-        // TEST ONLY (debug builds): skip dice/quiz/funding straight to mining.
-        if step == 1 && GwBridge.dev-mode: Button {
-            width: 100%;
-            size: ButtonSize.md;
-            variant: ButtonVariant.ghost;
-            text: "⚡ test: skip to mining";
-            clicked => {
-                GwBridge.dev-jump-to-mine();
-                root.step = 6;
-            }
-        }
 
         // ---- Step 2: write it down (tap to reveal all 12) --------------
         if step == 2: MonoText {

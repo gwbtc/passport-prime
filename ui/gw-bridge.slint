@@ -88,12 +88,6 @@ export global GwBridge {
     callback scan-funding() -> string;
     callback set-funding(string) -> string;
 
-    // TEST ONLY (debug builds; `dev-mode` is false in release). Populate the draft
-    // with a fixed seed + dummy funding UTXO so the mine step is reachable without
-    // rolling dice, the quiz, or real funding — for mining UI/perf analysis.
-    in property <bool> dev-mode;
-    callback dev-jump-to-mine();
-
     // On-device spawn. `spawn-begin` starts mining on a worker thread (returns ""
     // or an error) so the UI thread stays free for the animation. The UI Timer
     // then calls `spawn-poll` to read the live tries and, once finished, the
