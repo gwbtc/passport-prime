@@ -406,11 +406,17 @@ fn spawn_begin(draft: &Rc<RefCell<DraftState>>, mine: &Arc<Mutex<MineShared>>) -
 
     *mine.lock().unwrap() = MineShared::default();
     let shared = mine.clone();
-    slint_keyos_platform::spawn_worker(async move {
+    // A raw OS thread, not spawn_worker: the platform's cooperative async executor
+    // stalls a long CPU grind (a self-waking task stops being re-polled; its async
+    // sleep wedges the UI thread). xous preempts threads, so a plain blocking loop
+    // here runs concurrently with the UI. std::thread::sleep(1ms) per batch hands
+    // the single core to the UI thread for a smooth animation; cancel is polled per
+    // batch. The detached handle ends when the loop breaks (job drops -> seed wiped).
+    std::thread::spawn(move || {
         let mut job = job;
         loop {
             if shared.lock().unwrap().cancel {
-                break; // job drops here -> seed zeroized
+                break;
             }
             let step = job.step(BATCH);
             {
@@ -428,12 +434,9 @@ fn spawn_begin(draft: &Rc<RefCell<DraftState>>, mine: &Arc<Mutex<MineShared>>) -
                     }
                 }
             }
-            // Cooperative yield: lets the executor pause us if the app is hidden
-            // and keeps the worker from monopolizing its thread.
-            slint_keyos_platform::futures_lite::future::yield_now().await;
+            std::thread::sleep(std::time::Duration::from_millis(1));
         }
-    })
-    .detach();
+    });
     String::new()
 }
 
