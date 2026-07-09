@@ -16,7 +16,8 @@ support-url = "https://groundwire.io"
 [permissions]
 template = ["gui-app"]
 "os/settings" = ["GetDeviceName", "GetLocale", "GetPrimeColor"]
-# Read/write the per-app encrypted identities.json in Location::AppData.
+# Read/write the per-app encrypted identities.json in Location::AppData, and
+# write the comet boot key to Location::Airlock to hand it to a computer over USB.
 "os/fs" = [
     "OpenFileMessage",
     "CloseFile",
@@ -25,4 +26,7 @@ template = ["gui-app"]
     "SeekFile",
     "TruncateFile",
     "Flush",
+    "GetAirlockWriteAccess",
+    "MountAirlock",
+    "FormatAirlock",
 ]

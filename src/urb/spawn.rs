@@ -80,6 +80,9 @@ pub struct SpawnResult {
     pub reveal_raw_hex: String,
     pub reveal_txid_display: String,
     pub boot_command: String,
+    /// The `0v…` boot feed (embeds the comet's private networking key) written to
+    /// the USB key file the boot command reads. Secret — zeroize when done.
+    pub feed_uw: String,
 }
 
 /// The p2tr scriptPubKey of the app's own funding address.
@@ -129,7 +132,9 @@ pub fn assemble_spawn(
 
     let feed = boot::jam_feed(&mined.comet, 0, 1, &mined.ring_atom);
     let comet_patp = to_patp(&mined.comet);
-    let boot_command = boot::format_boot_command(&comet_patp, &feed, boot_script_url, None);
+    // The feed goes to a USB key file; the on-screen command reads it from there.
+    let feed_uw = boot::atom_to_uw(&feed);
+    let boot_command = boot::format_boot_command_keyfile(&comet_patp, boot_script_url, None);
 
     Ok(SpawnResult {
         comet_patp,
@@ -139,6 +144,7 @@ pub fn assemble_spawn(
         reveal_raw_hex: hex(&txs.reveal_raw),
         reveal_txid_display: wire_to_display(&txs.reveal_txid),
         boot_command,
+        feed_uw,
     })
 }
 
@@ -298,7 +304,9 @@ mod tests {
         assert!(!r.reveal_raw_hex.is_empty());
         assert_eq!(r.commit_txid_display.len(), 64);
         assert!(r.boot_command.contains(&r.comet_patp));
-        assert!(r.boot_command.contains("--feed 0v"));
+        // Command reads the feed from the USB key file; the feed itself is @uw.
+        assert!(r.boot_command.contains("--feed \"$(cat comet.feed)\""));
+        assert!(r.feed_uw.starts_with("0v"));
         // Segwit marker present in the finalized commit tx (version 02000000, 00 01).
         assert!(r.commit_raw_hex.starts_with("020000000001"));
     }

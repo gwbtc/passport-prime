@@ -33,6 +33,10 @@ export component CreatePagePage inherits Rectangle {
     property <bool> reveal-shown: false;
     // Which broadcast QR is on screen: 0 = commit, 1 = reveal.
     property <int> broadcast-page: 0;
+    // Go-live: whether the boot key has been written to the USB drive, and the
+    // last USB export error (empty = none).
+    property <bool> key-exported: false;
+    property <string> usb-msg: "";
     property <bool> spawning: false;
     property <int> spawn-tries: 0;
     property <string> mine-error: "";
@@ -57,6 +61,8 @@ export component CreatePagePage inherits Rectangle {
         root.words-shown = false;
         root.reveal-shown = false;
         root.broadcast-page = 0;
+        root.key-exported = false;
+        root.usb-msg = "";
     }
 
     // Full reset for a fresh ticket (also wipes the Rust-side draft + dice pool).
@@ -671,58 +677,79 @@ export component CreatePagePage inherits Rectangle {
             font-weight: 700;
             letter-spacing: 2px;
         }
-        if step == 8: Text {
-            text: "After the reveal confirms, run this on your computer to boot your comet. Keep your paper. Wipe this app before giving the device away.";
+        // Before export: transfer the boot key to a computer over USB. The key is
+        // a file the user copies off the device — it is never typed.
+        if step == 8 && !key-exported: Text {
+            text: "Connect this Passport to your computer with USB, then copy the boot key across.";
             color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 21px;
             wrap: word-wrap;
         }
-        // The boot command embeds your comet's private networking key (in --feed).
-        // Treat it like a secret: hold to reveal, and don't let another camera see it.
-        if step == 8: Text {
-            text: "This command contains your comet's private key. Do not photograph the screen or paste it publicly.";
-            color: Theme.palette-danger;
+        if step == 8 && usb-msg != "": NeonPanel {
+            accent: Theme.palette-danger;
+            VerticalLayout {
+                padding: 12px;
+                MonoText {
+                    text: "! " + usb-msg;
+                    color: Theme.palette-danger;
+                    font-size: 21px;
+                    font-weight: 600;
+                }
+            }
+        }
+        if step == 8 && !key-exported: Rectangle { vertical-stretch: 1; }
+        if step == 8 && !key-exported: Button {
+            width: 100%;
+            size: ButtonSize.lg;
+            variant: ButtonVariant.primary;
+            foreground: Cyber.on-neon;
+            text: "Copy boot key to USB";
+            clicked => {
+                root.usb-msg = GwBridge.export-boot-key();
+                if (root.usb-msg == "") {
+                    root.key-exported = true;
+                }
+            }
+        }
+
+        // After export: the key file is on the drive; show the command to run.
+        if step == 8 && key-exported: MonoText {
+            text: "on the USB drive: comet.feed + boot-comet.sh";
+            color: Cyber.neon;
+            font-size: 22px;
+            wrap: word-wrap;
+        }
+        if step == 8 && key-exported: Text {
+            text: "Run boot-comet.sh from the drive, or copy comet.feed to your computer and run:";
+            color: Theme.palette-muted;
             font-family: "Montserrat";
             font-size: 21px;
             wrap: word-wrap;
         }
-        if step == 8: NeonPanel {
+        if step == 8 && key-exported: NeonPanel {
             VerticalLayout {
                 padding: 14px;
-                spacing: 8px;
-                MonoText {
-                    text: "// boot your comet — secret";
-                    color: Cyber.neon;
+                // Plain Text (not MonoText) so char-wrap breaks long tokens; the
+                // command is short and non-secret (the key lives in the file).
+                Text {
+                    text: outcome.boot-command;
+                    color: Theme.palette-foreground;
+                    font-family: "Source Code Pro";
                     font-size: 19px;
-                    letter-spacing: 1px;
-                }
-                Rectangle {
-                    min-height: 60px;
-                    boothold := TouchArea { }
-                    if boothold.pressed: MonoText {
-                        text: outcome.boot-command;
-                        color: Theme.palette-foreground;
-                        font-size: 19px;
-                        wrap: word-wrap;
-                    }
-                    if !boothold.pressed: MonoText {
-                        text: "•••• press and hold to reveal — make sure no other camera can see this screen";
-                        color: Theme.palette-muted;
-                        font-size: 19px;
-                        wrap: word-wrap;
-                    }
+                    wrap: char-wrap;
                 }
             }
         }
-        if step == 8: Rectangle { vertical-stretch: 1; }
-        if step == 8: Button {
+        if step == 8 && key-exported: Rectangle { vertical-stretch: 1; }
+        if step == 8 && key-exported: Button {
             width: 100%;
             size: ButtonSize.lg;
             variant: ButtonVariant.primary;
             foreground: Cyber.on-neon;
             text: "My comet is live";
             clicked => {
+                GwBridge.wipe-usb();
                 GwBridge.set-stage(root.saved-index, 6);
                 reset-wizard();
                 Navigate.main-page({ });

@@ -114,6 +114,13 @@ export global GwBridge {
     pure callback commit-qr() -> image;
     pure callback reveal-qr() -> image;
 
+    // Go-live over USB: write the comet boot key to the Airlock partition and
+    // expose it to a connected computer as a USB drive; returns "" or an error.
+    // `wipe-usb` unmounts and wipes the key when the user is done. Device-only —
+    // both are no-op successes on the simulator.
+    callback export-boot-key() -> string;
+    callback wipe-usb() -> string;
+
     // Advance a persisted identity's stage (index into `identities`).
     callback set-stage(int /* index */, int /* stage */);
     // Record attestation (comet @p, commit txid, reveal txid) and set

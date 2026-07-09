@@ -38,6 +38,8 @@ struct DraftState {
     commit_hex: String,
     reveal_hex: String,
     comet: String,
+    /// The `0v…` boot feed (embeds the comet's private key) for the USB key file.
+    feed_uw: String,
 }
 
 impl DraftState {
@@ -58,6 +60,7 @@ impl DraftState {
         self.commit_hex.clear();
         self.reveal_hex.clear();
         self.comet.clear();
+        self.feed_uw.zeroize();
     }
 }
 
@@ -119,6 +122,7 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             commit_hex: String::new(),
             reveal_hex: String::new(),
             comet: String::new(),
+            feed_uw: String::new(),
         };
         IdentityDraft {
             funding_address: d.funding_address.into(),
@@ -148,6 +152,7 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             commit_hex: String::new(),
             reveal_hex: String::new(),
             comet: String::new(),
+            feed_uw: String::new(),
         };
     });
 
@@ -282,6 +287,24 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     ui.global::<GwBridge>().on_commit_qr(move || qrcode::render(dr.borrow().commit_hex.clone(), black, white));
     let dr = draft.clone();
     ui.global::<GwBridge>().on_reveal_qr(move || qrcode::render(dr.borrow().reveal_hex.clone(), black, white));
+
+    // Go-live: write the boot key to the Airlock and expose it over USB; wipe it
+    // once the user is done. Both return "" on success or a human-readable error.
+    let dr = draft.clone();
+    ui.global::<GwBridge>().on_export_boot_key(move || {
+        let (feed, script) = {
+            let d = dr.borrow();
+            (d.feed_uw.clone(), urb::boot::format_boot_script(&d.comet, BOOT_URL, None))
+        };
+        match store::export_boot_key(&feed, &script) {
+            Ok(()) => SharedString::new(),
+            Err(e) => e.into(),
+        }
+    });
+    ui.global::<GwBridge>().on_wipe_usb(move || match store::wipe_airlock() {
+        Ok(()) => SharedString::new(),
+        Err(e) => e.into(),
+    });
 
     // Advance a persisted identity's stage.
     let ids = identities.clone();
@@ -476,6 +499,7 @@ fn spawn_poll(mine: &Arc<Mutex<MineShared>>, draft: &Rc<RefCell<DraftState>>) ->
                 d.commit_hex = r.commit_raw_hex.clone();
                 d.reveal_hex = r.reveal_raw_hex.clone();
                 d.comet = r.comet_patp.clone();
+                d.feed_uw = r.feed_uw.clone();
             }
             SpawnProgress {
                 done: true,
@@ -531,6 +555,7 @@ fn load_identity(
         commit_hex: String::new(),
         reveal_hex: String::new(),
         comet: String::new(),
+        feed_uw: String::new(),
     };
     ResumeInfo {
         ok: true,

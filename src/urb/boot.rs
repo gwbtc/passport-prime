@@ -153,6 +153,12 @@ pub fn atom_to_uw(le: &[u8]) -> String {
     format!("0v{}", groups.join("."))
 }
 
+/// Filename of the boot key transferred to the user's computer over USB.
+pub const KEYFILE_NAME: &str = "comet.feed";
+/// A ready-to-run boot script placed on the USB drive next to the key file, so
+/// the user can run it directly instead of typing the command.
+pub const SCRIPT_NAME: &str = "boot-comet.sh";
+
 /// The copy-paste one-liner that installs the runtime and boots the comet.
 pub fn format_boot_command(comet_patp: &str, feed: &[u8], boot_script_url: &str, port: Option<u16>) -> String {
     let feed_uw = atom_to_uw(feed);
@@ -161,6 +167,37 @@ pub fn format_boot_command(comet_patp: &str, feed: &[u8], boot_script_url: &str,
         _ => String::new(),
     };
     format!("curl -fsSL {boot_script_url} | bash -s -- --comet {comet_patp} --feed {feed_uw}{port_arg}")
+}
+
+/// Same boot one-liner, but the (long, secret) feed is read from the key file the
+/// user copied off the device's USB drive rather than inlined — so the command is
+/// short, non-secret, and the key never has to be transcribed. `boot.sh` is
+/// unchanged; the feed still arrives via `--feed`, just sourced from the file.
+pub fn format_boot_command_keyfile(comet_patp: &str, boot_script_url: &str, port: Option<u16>) -> String {
+    let port_arg = match port {
+        Some(p) if p != 8080 => format!(" --port {p}"),
+        _ => String::new(),
+    };
+    format!(
+        "curl -fsSL {boot_script_url} | bash -s -- --comet {comet_patp} --feed \"$(cat {KEYFILE_NAME})\"{port_arg}"
+    )
+}
+
+/// Contents of the runnable boot script written next to the key file on the USB
+/// drive. Reads the feed from `comet.feed` in the script's own directory, so the
+/// user can just run it from the drive — the same command, one step.
+pub fn format_boot_script(comet_patp: &str, boot_script_url: &str, port: Option<u16>) -> String {
+    let port_arg = match port {
+        Some(p) if p != 8080 => format!(" --port {p}"),
+        _ => String::new(),
+    };
+    format!(
+        "#!/usr/bin/env bash\n\
+# groundwire — boot {comet_patp}. Run from the USB drive so {KEYFILE_NAME} is alongside.\n\
+set -euo pipefail\n\
+here=\"$(cd \"$(dirname \"${{BASH_SOURCE[0]}}\")\" && pwd)\"\n\
+curl -fsSL {boot_script_url} | bash -s -- --comet {comet_patp} --feed \"$(cat \"$here/{KEYFILE_NAME}\")\"{port_arg}\n"
+    )
 }
 
 #[cfg(test)]
@@ -268,5 +305,16 @@ mod tests {
         );
         let cmd_port = format_boot_command("~sampel-palnet", &feed, "u", Some(9000));
         assert!(cmd_port.ends_with("--feed 0v1 --port 9000"));
+    }
+
+    #[test]
+    fn boot_script_format() {
+        let s = format_boot_script("~sampel-palnet", "https://groundwire.io/causeway/boot.sh", None);
+        assert!(s.starts_with("#!/usr/bin/env bash\n"));
+        assert!(s.contains("--comet ~sampel-palnet"));
+        // Reads the key from comet.feed in the script's own directory.
+        assert!(s.contains("--feed \"$(cat \"$here/comet.feed\")\""));
+        assert!(s.contains("${BASH_SOURCE[0]}"));
+        assert!(format_boot_script("~s", "u", Some(9000)).trim_end().ends_with("--port 9000"));
     }
 }

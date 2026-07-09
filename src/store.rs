@@ -88,3 +88,39 @@ pub fn save(items: &[Identity]) -> Result<(), fs::Error> {
     let json = serde_json::to_vec(items).expect("identities serialize");
     f.overwrite(&json)
 }
+
+/// Write the comet boot key file and a runnable boot script to the Airlock
+/// partition and expose them to a connected computer as a USB drive. The user
+/// either runs the script or copies the key file and runs the shown command
+/// (see [`crate::urb::boot::format_boot_command_keyfile`] / `format_boot_script`).
+///
+/// Airlock is a real block device that only exists on the Passport; the simulator
+/// has none, so there this returns Ok without touching hardware — the go-live flow
+/// stays testable, and the transfer is verified on device. The airlock calls are
+/// compiled (and type-checked) on both targets; only the runtime call is skipped.
+pub fn export_boot_key(feed_uw: &str, boot_script: &str) -> Result<(), String> {
+    if !cfg!(target_os = "xous") {
+        return Ok(()); // simulator: no Airlock hardware
+    }
+    use crate::urb::boot::{KEYFILE_NAME, SCRIPT_NAME};
+    let mut fs = FileSystem::default();
+    fs.format_airlock().map_err(|e| format!("{e:?}"))?;
+    for (name, bytes) in [(KEYFILE_NAME, feed_uw.as_bytes()), (SCRIPT_NAME, boot_script.as_bytes())] {
+        let mut f = fs
+            .open_file(name, Location::Airlock, OpenFlags::CREATE)
+            .map_err(|e| format!("{e:?}"))?;
+        f.overwrite(bytes).map_err(|e| format!("{e:?}"))?;
+    }
+    fs.mount_airlock().map_err(|e| format!("{e:?}"))
+}
+
+/// Unmount and wipe the Airlock so the boot key no longer sits on the USB drive.
+/// Device-only; a no-op on the simulator (see [`export_boot_key`]).
+pub fn wipe_airlock() -> Result<(), String> {
+    if !cfg!(target_os = "xous") {
+        return Ok(());
+    }
+    let mut fs = FileSystem::default();
+    let _ = fs.unmount_airlock(); // reclaim from host; ignore if not mounted
+    fs.format_airlock().map_err(|e| format!("{e:?}"))
+}
