@@ -284,6 +284,15 @@ mod tests {
         assert_eq!(mined.comet.len(), 16);
     }
 
+    // Pin the sponsor star: REQUIRED_STAR must render as ~daplyd. Guards against a
+    // typo in the constant silently mining under a neighboring star (all else green).
+    #[test]
+    fn required_star_is_daplyd() {
+        // Comet atom low word = star: byte0 suffix, byte1 prefix (little-endian).
+        let atom = [(REQUIRED_STAR & 0xff) as u8, (REQUIRED_STAR >> 8) as u8];
+        assert_eq!(crate::identity::to_patp(&atom), "~daplyd");
+    }
+
     // Real ~daplyd search (~65k iterations). Slow; run explicitly:
     //   cargo test --bins -- --ignored mines_a_real_daplyd_comet
     #[test]
