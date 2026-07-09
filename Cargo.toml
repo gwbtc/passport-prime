@@ -22,7 +22,8 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
 # ed25519 point arithmetic for the suite-C comet miner (P + s·G, compress/decompress).
-curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
+# precomputed-tables: fast fixed-base mul_base for the two basepoint mults per mine try.
+curve25519-dalek = { version = "4", default-features = false, features = ["alloc", "precomputed-tables"] }
 
 # Wipe ticket/mnemonic/entropy from memory when the wizard leaves or regenerates.
 zeroize = { version = "1", features = ["alloc"] }
@@ -32,6 +33,18 @@ zeroize = { version = "1", features = ["alloc"] }
 # fail-closed seam in main.rs (see docs/trng-spike.md). Already in the tree.
 [target.'cfg(not(target_os = "xous"))'.dependencies]
 getrandom = "0.2"
+
+# The sim builds dev; unoptimized curve25519 is ~10-30x slower than release, which
+# dominates comet-mining time. Optimize dependencies (keeps app fast-to-rebuild).
+[profile.dev.package."*"]
+opt-level = 3
+
+# The device build is release. Fat LTO + one codegen unit lets the compiler inline
+# across the curve25519/sha2 crate boundary — ~10-20% on the mining hot loop.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
 
 [build-dependencies]
 foundation-themes = { path = "../foundation-sdk/lib/keyos/sdk/crates/foundation-themes" }

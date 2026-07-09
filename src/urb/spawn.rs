@@ -151,7 +151,8 @@ pub struct SpawnJob {
     seed: Vec<u8>,
     funding: FundingInput,
     tweak: Vec<u8>,
-    rng: Box<dyn FnMut(&mut [u8; 64])>,
+    // `+ Send` so the whole job can move onto a worker thread (spawn_worker).
+    rng: Box<dyn FnMut(&mut [u8; 64]) + Send>,
     fee_rate: u64,
     aux_rand: [u8; 32],
     boot_script_url: String,
@@ -188,7 +189,7 @@ impl SpawnJob {
         seed: &[u8],
         funding: FundingInput,
         fee_rate: u64,
-        rng: impl FnMut(&mut [u8; 64]) + 'static,
+        rng: impl FnMut(&mut [u8; 64]) + Send + 'static,
         aux_rand: [u8; 32],
         boot_script_url: &str,
     ) -> Result<SpawnJob, String> {

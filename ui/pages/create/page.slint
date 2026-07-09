@@ -65,10 +65,10 @@ export component CreatePagePage inherits Rectangle {
     // UI keeps repainting and Cancel stays responsive. Slint forbids a Timer in
     // an `if`, so it lives at component scope and self-gates via `running`.
     mine-timer := Timer {
-        interval: 1ms;
+        interval: 33ms;
         running: root.step == 6 && root.spawning;
         triggered => {
-            root.prog = GwBridge.spawn-step();
+            root.prog = GwBridge.spawn-poll();
             root.spawn-tries = root.prog.tries;
             if (root.prog.done) {
                 root.spawning = false;
@@ -173,6 +173,17 @@ export component CreatePagePage inherits Rectangle {
                     root.words-shown = false;
                     root.step = 2;
                 }
+            }
+        }
+        // TEST ONLY (debug builds): skip dice/quiz/funding straight to mining.
+        if step == 1 && GwBridge.dev-mode: Button {
+            width: 100%;
+            size: ButtonSize.md;
+            variant: ButtonVariant.ghost;
+            text: "⚡ test: skip to mining";
+            clicked => {
+                GwBridge.dev-jump-to-mine();
+                root.step = 6;
             }
         }
 
@@ -478,10 +489,35 @@ export component CreatePagePage inherits Rectangle {
             wrap: word-wrap;
         }
         if step == 6 && spawning: MonoText {
-            text: "mining… \{spawn-tries} tries — keep the Passport awake";
+            text: "mining… \{spawn-tries} tries";
             color: Cyber.neon;
             font-size: 22px;
             letter-spacing: 1px;
+        }
+        // Indeterminate neon scanner: a block sweeping back and forth while the
+        // worker thread mines. Uses `animate` (not animation-tick), so it only
+        // ticks while this element exists — no continuous repaint when idle.
+        if step == 6 && spawning: Rectangle {
+            height: 8px;
+            border-radius: 4px;
+            background: Cyber.neon.with-alpha(0.15);
+            clip: true;
+            // Flip on appear to kick off the looping sweep.
+            property <bool> go: false;
+            init => { self.go = true; }
+            Rectangle {
+                width: 35%;
+                height: parent.height;
+                border-radius: 4px;
+                background: Cyber.neon;
+                x: parent.go ? (parent.width - self.width) : 0px;
+                animate x {
+                    duration: 900ms;
+                    easing: ease-in-out;
+                    iteration-count: -1;
+                    direction: alternate;
+                }
+            }
         }
         if step == 6 && mine-error != "": NeonPanel {
             accent: Theme.palette-danger;
@@ -515,7 +551,7 @@ export component CreatePagePage inherits Rectangle {
             size: ButtonSize.md;
             variant: ButtonVariant.ghost;
             text: "Cancel";
-            clicked => { root.spawning = false; }
+            clicked => { GwBridge.spawn-cancel(); root.spawning = false; }
         }
         if step == 6 && !spawning: Button {
             width: 100%;

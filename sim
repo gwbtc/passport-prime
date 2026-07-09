@@ -18,24 +18,49 @@
 #    We hand it a minimal dir of symlinks to the system wayland libs on
 #    LD_LIBRARY_PATH — enough for that dlopen, without the blanket /usr/lib that
 #    ABI-clashes and segfaults the Nix-built kernel.
+#
+# 3. Window size (SIM_SCALE, default 0.93). The emulator renders a fixed 576x1072
+#    device frame and pins its window non-resizable (min==max==device). Its only
+#    size lever is a raw float `scale` it reads from the sim's settings.json (the
+#    SetScaleFactor IPC accepts values below the simulator-cli 1x/1.5x/2x floor),
+#    so we write it there before launch. Tradeoff you can't avoid here: scale 1.0
+#    is crisp but 1072px tall (overflows most screens); any scale <1 downsamples
+#    the finished frame, so it's smaller but progressively softer. Pick per taste
+#    (0.7-0.8 is a decent sharp-ish compromise). SIM_SCALE=1 = full size.
+#
+#    Tried & rejected: a nested gamescope compositor to render native + downscale
+#    with filtering (crisp AND small AND resizable). The emulator's winit window
+#    won't initialize on gamescope — window.rs:403 panics NotSupported on both its
+#    Wayland display and its XWayland (WINIT_UNIX_BACKEND=x11). Real incompat, not
+#    a flag; don't re-add it. gamescope can be uninstalled; it's unused here.
 set -euo pipefail
 
 here="$(cd -- "$(dirname -- "$0")" && pwd)"
 shim="$here/.wl-shim"
 
-# Build the wayland shim once (symlinks into a dir git ignores). Delete .wl-shim
-# to force a rebuild after a system library update.
-if [ ! -e "$shim/libwayland-client.so.0" ]; then
-  mkdir -p "$shim"
-  for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
-            libxkbcommon.so.0 libffi.so.8; do
-    src="$(ldconfig -p | awk -v n="$so" '$1 == n { print $NF; exit }')"
-    if [ -n "$src" ]; then
-      ln -sf "$src" "$shim/$so"
-    else
-      echo "sim: warning: $so not found via ldconfig; the emulator may not start" >&2
-    fi
-  done
+# Ensure the lib shim (symlinks into a git-ignored dir). ln -sf is idempotent, so
+# this also self-heals when the list below grows. Delete .wl-shim to rebuild
+# after a system library update. Snapshot ldconfig ONCE and match in-shell:
+# piping it into `awk '...exit'` per lib makes awk close the pipe early, and
+# under `pipefail`+`set -e` ldconfig's SIGPIPE aborts the whole script.
+mkdir -p "$shim"
+cache="$(ldconfig -p)"
+for so in libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 \
+          libxkbcommon.so.0 libffi.so.8; do
+  src="$(awk -v n="$so" '$1 == n { print $NF; exit }' <<<"$cache")"
+  if [ -n "$src" ]; then
+    ln -sf "$src" "$shim/$so"
+  else
+    echo "sim: warning: $so not found via ldconfig; the emulator may not start" >&2
+  fi
+done
+
+# Assert the emulator window scale (see note 3); the sim persists this itself.
+settings=~/.foundation/sdk/current/lib/keyos/simulator/simulator-files/settings.json
+if [ -w "$settings" ] || [ -w "$(dirname "$settings")" ]; then
+  printf '{"scale":%s}' "${SIM_SCALE:-0.93}" > "$settings"
+else
+  echo "sim: warning: can't write $settings; window scale unchanged" >&2
 fi
 
 exec systemd-run --user --scope --quiet \

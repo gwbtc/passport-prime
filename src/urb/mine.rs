@@ -11,8 +11,7 @@
 
 use sha2::{Digest, Sha256, Sha512};
 
-use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
-use curve25519_dalek::edwards::CompressedEdwardsY;
+use curve25519_dalek::edwards::{CompressedEdwardsY, EdwardsPoint};
 use curve25519_dalek::scalar::Scalar;
 
 use super::encoder::BitWriter;
@@ -29,9 +28,10 @@ const SALT_CFIG: [u8; 32] = {
     s
 };
 
-/// ed25519 public key from a 32-byte private seed (RFC 8032 / noble `getPublicKey`):
-/// clamp `SHA-512(seed)[..32]`, multiply the basepoint, compress.
-fn ed_pubkey_from_seed(seed32: &[u8; 32]) -> [u8; 32] {
+/// ed25519 public point + its compressed encoding from a 32-byte private seed
+/// (RFC 8032 / noble `getPublicKey`): clamp `SHA-512(seed)[..32]`, `mul_base`.
+/// Returns the point so callers doing further arithmetic skip a decompress.
+fn ed_point_from_seed(seed32: &[u8; 32]) -> (EdwardsPoint, [u8; 32]) {
     let h = Sha512::digest(seed32);
     let mut clamp = [0u8; 32];
     clamp.copy_from_slice(&h[..32]);
@@ -40,7 +40,12 @@ fn ed_pubkey_from_seed(seed32: &[u8; 32]) -> [u8; 32] {
     clamp[31] |= 64;
     // (clamp mod L)·B == clamp·B since B has order L.
     let s = Scalar::from_bytes_mod_order(clamp);
-    (ED25519_BASEPOINT_POINT * s).compress().to_bytes()
+    let point = EdwardsPoint::mul_base(&s);
+    (point, point.compress().to_bytes())
+}
+
+fn ed_pubkey_from_seed(seed32: &[u8; 32]) -> [u8; 32] {
+    ed_point_from_seed(seed32).1
 }
 
 /// `P' = P + s·G`, with `s` the 32-byte scalar read **little-endian** (`byte[0]`
@@ -51,7 +56,7 @@ fn ed_add_scalar_public(pub32: &[u8; 32], scalar32: &[u8; 32]) -> [u8; 32] {
     let p = CompressedEdwardsY(*pub32)
         .decompress()
         .expect("valid ed25519 point");
-    (p + ED25519_BASEPOINT_POINT * s).compress().to_bytes()
+    (p + EdwardsPoint::mul_base(&s)).compress().to_bytes()
 }
 
 /// Hoon `++shas`: `SHA-256(salt ⊕ SHA-256(msg))` with salt-padding rules.
@@ -121,17 +126,22 @@ pub fn spawn_once(seed64: &[u8; 64], tweak: &[u8]) -> Candidate {
     let ring_material: [u8; 64] = Sha512::digest(seed64).into();
     let mut s_seed = [0u8; 32];
     s_seed.copy_from_slice(&ring_material[..32]);
-    let s_pub = ed_pubkey_from_seed(&s_seed);
+    let (s_point, s_pub) = ed_point_from_seed(&s_seed);
     // The ed25519 private seed is only needed for the pubkey above; scrub it.
     // (ring_material itself is the returned comet secret and lives until display.)
     zeroize::Zeroize::zeroize(&mut s_seed);
 
-    let mut tw = Vec::with_capacity(32 + tweak.len());
-    tw.extend_from_slice(&s_pub);
-    tw.extend_from_slice(tweak);
-    let tw_sca: [u8; 32] = Sha256::digest(&tw).into();
+    // Stream sPub‖tweak into the hasher — no per-iteration heap alloc (matters on device).
+    let tw_sca: [u8; 32] = Sha256::new()
+        .chain_update(s_pub)
+        .chain_update(tweak)
+        .finalize()
+        .into();
 
-    let tweaked = ed_add_scalar_public(&s_pub, &tw_sca);
+    // tweaked = sPub + tw_sca·G, on the point we already have (no decompress).
+    // Equals ed_add_scalar_public(&s_pub, &tw_sca) — asserted in tests.
+    let s = Scalar::from_bytes_mod_order(tw_sca);
+    let tweaked = (s_point + EdwardsPoint::mul_base(&s)).compress().to_bytes();
     let comet = shaf(&SALT_CFIG, &tweaked);
     Candidate { ring_material, s_pub, comet }
 }
@@ -178,6 +188,7 @@ pub fn mine(tweak: &[u8], rng: impl FnMut(&mut [u8; 64]), max_tries: u64) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
+    use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 
     fn hex(b: &[u8]) -> String {
         b.iter().map(|x| format!("{x:02x}")).collect()

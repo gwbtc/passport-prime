@@ -8,6 +8,7 @@ mod wizard;
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use slint_keyos_platform::slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use slint_keyos_platform::{app_ui, qrcode};
@@ -85,8 +86,9 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
     let pool = Rc::new(RefCell::new(entropy::EntropyPool::default()));
     // The in-progress identity, shared across the wizard's steps.
     let draft = Rc::new(RefCell::new(DraftState::default()));
-    // The chunked mining job, live only while the mine step runs.
-    let spawn_job: Rc<RefCell<Option<urb::spawn::SpawnJob>>> = Rc::new(RefCell::new(None));
+    // Shared state for the worker-thread miner: the UI polls `tries`/`done` from
+    // the main thread while the worker updates them. `cancel` stops the worker.
+    let mine: Arc<Mutex<MineShared>> = Arc::new(Mutex::new(MineShared::default()));
 
     let p = pool.clone();
     ui.global::<GwBridge>().on_add_roll(move |face| p.borrow_mut().add_roll(face as u8, now_nanos()) as i32);
@@ -122,6 +124,31 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             funding_address: d.funding_address.into(),
             mnemonic: d.mnemonic.into(),
         }
+    });
+
+    // TEST ONLY: jump straight to the mine step with a fixed seed + dummy funding,
+    // so mining UI/perf can be exercised without dice/quiz/funding. Gated to debug
+    // builds via `dev-mode`; the button is hidden and this never persists anything.
+    ui.global::<GwBridge>().set_dev_mode(cfg!(debug_assertions));
+    let dr = draft.clone();
+    ui.global::<GwBridge>().on_dev_jump_to_mine(move || {
+        let ent = [0x11u8; 16];
+        let d = identity::new_identity(ent);
+        *dr.borrow_mut() = DraftState {
+            entropy: ent.to_vec(),
+            salt: 0,
+            mnemonic: d.mnemonic,
+            address: d.funding_address,
+            quiz: Vec::new(),
+            funding: Some(urb::spawn::FundingInput {
+                txid_display_hex: "11".repeat(32),
+                vout: 0,
+                value: 100_000,
+            }),
+            commit_hex: String::new(),
+            reveal_hex: String::new(),
+            comet: String::new(),
+        };
     });
 
     // The draft's 12 words, for the write-down grid.
@@ -206,15 +233,21 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
         Err(e) => e.into(),
     });
 
-    // Chunked on-device spawn: `begin` sets up the job; the UI's Timer calls
-    // `step` each frame so mining (minutes on-device) never blocks the UI.
+    // On-device spawn: `begin` kicks off mining on a worker thread so the UI
+    // thread stays free (smooth animation); the UI Timer `poll`s progress and,
+    // on completion, the signed result. `cancel` stops the worker.
     let dr = draft.clone();
-    let sj = spawn_job.clone();
-    ui.global::<GwBridge>().on_spawn_begin(move || spawn_begin(&dr, &sj).into());
+    let mn = mine.clone();
+    ui.global::<GwBridge>().on_spawn_begin(move || spawn_begin(&dr, &mn).into());
 
     let dr = draft.clone();
-    let sj = spawn_job.clone();
-    ui.global::<GwBridge>().on_spawn_step(move || spawn_step(&sj, &dr));
+    let mn = mine.clone();
+    ui.global::<GwBridge>().on_spawn_poll(move || spawn_poll(&mn, &dr));
+
+    let mn = mine.clone();
+    ui.global::<GwBridge>().on_spawn_cancel(move || {
+        mn.lock().unwrap().cancel = true;
+    });
 
     // Persist the funding UTXO onto the in-progress identity (stage = funded).
     let dr = draft.clone();
@@ -322,12 +355,27 @@ fn scan_funding(draft: &Rc<RefCell<DraftState>>) -> String {
     }
 }
 
-/// Initialise the chunked spawn from the draft's seed + funding UTXO. Returns
-/// "" on success (the job is stored) or a human-readable error.
-fn spawn_begin(
-    draft: &Rc<RefCell<DraftState>>,
-    job: &Rc<RefCell<Option<urb::spawn::SpawnJob>>>,
-) -> String {
+/// Live state of the worker-thread mine, shared between the worker (writer) and
+/// the UI poll on the main thread (reader). The seed never lives here — it stays
+/// inside the `SpawnJob` moved onto the worker (zeroized when that job drops).
+#[derive(Default)]
+struct MineShared {
+    /// Iterations mined so far, for the progress readout.
+    tries: u64,
+    /// Set by the UI's Cancel; the worker checks it each batch and stops.
+    cancel: bool,
+    /// Populated once mining finishes: the signed result, or a terminal error.
+    done: Option<Result<Box<urb::spawn::SpawnResult>, String>>,
+}
+
+/// Iterations mined per batch between cancel checks / progress updates. Small
+/// enough that Cancel and the tries readout stay responsive on the slow device.
+const BATCH: u64 = 500;
+
+/// Start mining on a worker thread from the draft's seed + funding UTXO. Returns
+/// "" on success or a human-readable error. Mining runs off the UI thread so the
+/// animation stays smooth; progress lands in `mine` for [`spawn_poll`] to read.
+fn spawn_begin(draft: &Rc<RefCell<DraftState>>, mine: &Arc<Mutex<MineShared>>) -> String {
     let (mut seed, funding) = {
         let d = draft.borrow();
         if d.entropy.len() != 16 {
@@ -346,16 +394,47 @@ fn spawn_begin(
         )
     };
     let aux = aux_rand();
-    let result = match urb::spawn::SpawnJob::new(&seed, funding, FEE_RATE, spawn_rng(&seed), aux, BOOT_URL) {
-        Ok(j) => {
-            *job.borrow_mut() = Some(j);
-            String::new()
+    let job = match urb::spawn::SpawnJob::new(&seed, funding, FEE_RATE, spawn_rng(&seed), aux, BOOT_URL) {
+        Ok(j) => j,
+        Err(e) => {
+            zeroize::Zeroize::zeroize(&mut seed);
+            return e;
         }
-        Err(e) => e,
     };
     // Scrub this local copy of the seed; SpawnJob keeps its own (zeroized on drop).
     zeroize::Zeroize::zeroize(&mut seed);
-    result
+
+    *mine.lock().unwrap() = MineShared::default();
+    let shared = mine.clone();
+    slint_keyos_platform::spawn_worker(async move {
+        let mut job = job;
+        loop {
+            if shared.lock().unwrap().cancel {
+                break; // job drops here -> seed zeroized
+            }
+            let step = job.step(BATCH);
+            {
+                let mut m = shared.lock().unwrap();
+                m.tries = job.tries;
+                match step {
+                    urb::spawn::SpawnStep::Working => {}
+                    urb::spawn::SpawnStep::Done(r) => {
+                        m.done = Some(Ok(r));
+                        break;
+                    }
+                    urb::spawn::SpawnStep::Failed(e) => {
+                        m.done = Some(Err(e));
+                        break;
+                    }
+                }
+            }
+            // Cooperative yield: lets the executor pause us if the app is hidden
+            // and keeps the worker from monopolizing its thread.
+            slint_keyos_platform::futures_lite::future::yield_now().await;
+        }
+    })
+    .detach();
+    String::new()
 }
 
 fn progress_err(e: &str, tries: u64) -> SpawnProgress {
@@ -371,20 +450,14 @@ fn progress_err(e: &str, tries: u64) -> SpawnProgress {
     }
 }
 
-/// Mine one batch. On a hit, stashes the raw txs on the draft for the QRs and
-/// reports the outcome; otherwise reports progress so the UI's Timer calls again.
-fn spawn_step(
-    job: &Rc<RefCell<Option<urb::spawn::SpawnJob>>>,
-    draft: &Rc<RefCell<DraftState>>,
-) -> SpawnProgress {
-    const BATCH: u64 = 3000;
-    let mut jb = job.borrow_mut();
-    let (outcome, tries) = match jb.as_mut() {
-        Some(j) => (j.step(BATCH), j.tries),
-        None => return progress_err("Spawn not started.", 0),
-    };
-    match outcome {
-        urb::spawn::SpawnStep::Working => SpawnProgress {
+/// Read the worker-thread mine's progress (called from the UI Timer, main thread).
+/// While searching, reports the live `tries`. Once finished, stashes the raw txs
+/// on the draft for the broadcast QRs and reports the outcome.
+fn spawn_poll(mine: &Arc<Mutex<MineShared>>, draft: &Rc<RefCell<DraftState>>) -> SpawnProgress {
+    let mut m = mine.lock().unwrap();
+    let tries = m.tries;
+    match m.done.take() {
+        None => SpawnProgress {
             done: false,
             ok: false,
             error: SharedString::new(),
@@ -394,8 +467,7 @@ fn spawn_step(
             reveal_txid: SharedString::new(),
             boot_command: SharedString::new(),
         },
-        urb::spawn::SpawnStep::Done(r) => {
-            *jb = None;
+        Some(Ok(r)) => {
             {
                 let mut d = draft.borrow_mut();
                 d.commit_hex = r.commit_raw_hex.clone();
@@ -413,10 +485,7 @@ fn spawn_step(
                 boot_command: r.boot_command.into(),
             }
         }
-        urb::spawn::SpawnStep::Failed(e) => {
-            *jb = None;
-            progress_err(&e, tries)
-        }
+        Some(Err(e)) => progress_err(&e, tries),
     }
 }
 
