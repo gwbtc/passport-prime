@@ -122,6 +122,9 @@ pub fn spawn_once(seed64: &[u8; 64], tweak: &[u8]) -> Candidate {
     let mut s_seed = [0u8; 32];
     s_seed.copy_from_slice(&ring_material[..32]);
     let s_pub = ed_pubkey_from_seed(&s_seed);
+    // The ed25519 private seed is only needed for the pubkey above; scrub it.
+    // (ring_material itself is the returned comet secret and lives until display.)
+    zeroize::Zeroize::zeroize(&mut s_seed);
 
     let mut tw = Vec::with_capacity(32 + tweak.len());
     tw.extend_from_slice(&s_pub);

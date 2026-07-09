@@ -321,6 +321,7 @@ dependencies = [
  "hmac",
  "k256",
  "sha2",
+ "zeroize",
 ]
 
 [[package]]

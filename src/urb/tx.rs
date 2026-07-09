@@ -320,7 +320,7 @@ pub fn build_and_sign_spawn(
     let funding_spk = p2tr_spk(&kp.output_x); // the funding address the user paid
 
     // Commit: spend the funding UTXO (key-path) into the P2TR script-tree output.
-    let commit_fee = (11 + 58 + 43) * fee_rate;
+    let commit_fee = 112u64.checked_mul(fee_rate).ok_or("fee rate overflows u64")?;
     let commit_value = funding
         .value
         .checked_sub(commit_fee)
@@ -351,7 +351,7 @@ pub fn build_and_sign_spawn(
     let input_weight = 265 + leaf.len() as u64;
     let input_vb = input_weight.div_ceil(4);
     let reveal_vbytes = 11 + input_vb + 43;
-    let reveal_fee = reveal_vbytes * fee_rate;
+    let reveal_fee = reveal_vbytes.checked_mul(fee_rate).ok_or("fee rate overflows u64")?;
     let reveal_value = commit_value
         .checked_sub(reveal_fee)
         .filter(|v| *v >= 330)

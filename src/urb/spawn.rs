@@ -160,6 +160,17 @@ pub struct SpawnJob {
     budget: u64,
 }
 
+impl Drop for SpawnJob {
+    /// The job holds the ticket seed (and derives the comet key from it) for the
+    /// whole multi-minute mine; scrub the secret material when it's dropped.
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.seed.zeroize();
+        self.tweak.zeroize();
+        self.aux_rand.zeroize();
+    }
+}
+
 /// One `step` outcome.
 pub enum SpawnStep {
     /// Still searching; `tries` on the job has advanced.

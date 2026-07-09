@@ -19,6 +19,7 @@ hmac = { version = "0.12", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 bech32 = { version = "0.11", default-features = false, features = ["alloc"] }
 curve25519-dalek = { version = "4", default-features = false, features = ["alloc"] }
+zeroize = { version = "1", default-features = false, features = ["alloc"] }
 
 [profile.release]
 panic = "abort"

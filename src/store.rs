@@ -57,6 +57,16 @@ pub struct Identity {
     pub reveal_txid: String,
 }
 
+impl Drop for Identity {
+    /// The mnemonic is the whole secret (wallet + ship). Scrub it from the heap
+    /// when an Identity is dropped — on delete, on list reload, and at exit — so
+    /// a used seed isn't left in freed memory. (address/txids/comet are public.)
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.mnemonic.zeroize();
+    }
+}
+
 /// Load all stored identities. Returns empty on first run or any read error —
 /// a corrupt/absent store must never crash the app.
 pub fn load() -> Vec<Identity> {

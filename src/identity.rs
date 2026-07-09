@@ -196,12 +196,13 @@ pub(crate) fn tagged_hash(tag: &str, msg: &[u8]) -> [u8; 32] {
 }
 
 pub(crate) fn scalar_from(bytes: &[u8]) -> k256::Scalar {
-    use k256::elliptic_curve::PrimeField;
-    // ponytail: BIP-32 says reject IL >= n and retry; that path has ~2^-128
-    // probability, so we just reduce/parse. from_repr rejects >= n, but a plain
-    // reduce keeps arithmetic total; use reduce-free parse and expect.
-    let repr = k256::FieldBytes::from(to_arr32(bytes));
-    k256::Scalar::from_repr(repr).expect("scalar < curve order")
+    use k256::elliptic_curve::ops::Reduce;
+    // BIP-32/BIP-341 treat a >= n scalar as invalid (skip index / abort); that
+    // has ~2^-128 probability. Rather than panic the app on that unreachable
+    // event, reduce mod n — total, and byte-identical to from_repr for every
+    // value < n (i.e. all of them in practice, so the pinned vectors are unchanged).
+    // Scalar: Reduce<U256> and Reduce<U512>, so pin the U256 impl.
+    <k256::Scalar as Reduce<k256::U256>>::reduce_bytes(&k256::FieldBytes::from(to_arr32(bytes)))
 }
 
 fn to_arr32(b: &[u8]) -> [u8; 32] {

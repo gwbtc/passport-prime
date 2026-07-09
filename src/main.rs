@@ -60,6 +60,14 @@ impl DraftState {
     }
 }
 
+impl Drop for DraftState {
+    /// Wipe on drop, so replacing the draft (regenerate / resume a different
+    /// identity) or tearing down the app scrubs the previous seed automatically.
+    fn drop(&mut self) {
+        self.wipe();
+    }
+}
+
 app_ui!("groundwire");
 
 fn app_main(_cx: AppContext, ui: AppWindow) {
@@ -104,7 +112,11 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             salt: salt_from(&d.funding_address),
             mnemonic: d.mnemonic.clone(),
             address: d.funding_address.clone(),
-            ..Default::default()
+            quiz: Vec::new(),
+            funding: None,
+            commit_hex: String::new(),
+            reveal_hex: String::new(),
+            comet: String::new(),
         };
         IdentityDraft {
             funding_address: d.funding_address.into(),
@@ -146,14 +158,27 @@ fn app_main(_cx: AppContext, ui: AppWindow) {
             d.quiz.clear();
             return false;
         }
-        ids.borrow_mut().push(store::Identity {
-            label: label_from_address(&d.address),
-            mnemonic: d.mnemonic.clone(),
-            address: d.address.clone(),
-            created_unix: now_unix(),
-            stage: store::stage::BACKED_UP,
-            ..Default::default()
-        });
+        // Idempotent: the quiz is reachable again via the funding step's Back
+        // button, so re-passing it must not append a second copy of an identity
+        // we already saved. Match on address (unique per draft).
+        {
+            let mut list = ids.borrow_mut();
+            if !list.iter().any(|it| it.address == d.address) {
+                // Explicit fields (no `..Default::default()`): Identity impls Drop
+                // for zeroization, so struct-update can't move out of a default.
+                list.push(store::Identity {
+                    label: label_from_address(&d.address),
+                    mnemonic: d.mnemonic.clone(),
+                    address: d.address.clone(),
+                    created_unix: now_unix(),
+                    stage: store::stage::BACKED_UP,
+                    funding: String::new(),
+                    comet: String::new(),
+                    commit_txid: String::new(),
+                    reveal_txid: String::new(),
+                });
+            }
+        }
         persist_and_refresh(&ids.borrow(), &m);
         d.quiz.clear();
         true
@@ -303,7 +328,7 @@ fn spawn_begin(
     draft: &Rc<RefCell<DraftState>>,
     job: &Rc<RefCell<Option<urb::spawn::SpawnJob>>>,
 ) -> String {
-    let (seed, funding) = {
+    let (mut seed, funding) = {
         let d = draft.borrow();
         if d.entropy.len() != 16 {
             return "No ticket in progress.".into();
@@ -321,13 +346,16 @@ fn spawn_begin(
         )
     };
     let aux = aux_rand();
-    match urb::spawn::SpawnJob::new(&seed, funding, FEE_RATE, spawn_rng(&seed), aux, BOOT_URL) {
+    let result = match urb::spawn::SpawnJob::new(&seed, funding, FEE_RATE, spawn_rng(&seed), aux, BOOT_URL) {
         Ok(j) => {
             *job.borrow_mut() = Some(j);
             String::new()
         }
         Err(e) => e,
-    }
+    };
+    // Scrub this local copy of the seed; SpawnJob keeps its own (zeroized on drop).
+    zeroize::Zeroize::zeroize(&mut seed);
+    result
 }
 
 fn progress_err(e: &str, tries: u64) -> SpawnProgress {
@@ -427,7 +455,10 @@ fn load_identity(
         mnemonic: mnemonic.clone(),
         address: address.clone(),
         funding,
-        ..Default::default()
+        quiz: Vec::new(),
+        commit_hex: String::new(),
+        reveal_hex: String::new(),
+        comet: String::new(),
     };
     ResumeInfo {
         ok: true,
