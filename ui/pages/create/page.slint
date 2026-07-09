@@ -574,11 +574,14 @@ export component CreatePagePage inherits Rectangle {
             font-weight: 700;
             letter-spacing: 2px;
         }
-        if step == 7: MonoText {
+        // Plain Text (not MonoText) so char-wrap breaks the long dot-joined
+        // mnemonym, which has no spaces for word-wrap to break on.
+        if step == 7: Text {
             text: "comet: " + outcome.comet;
             color: Cyber.neon;
+            font-family: "Source Code Pro";
             font-size: 24px;
-            wrap: word-wrap;
+            wrap: char-wrap;
         }
         if step == 7: Text {
             text: "Broadcast COMMIT first on mempool.space. Wait for it to confirm, then broadcast REVEAL. Never re-run after commit.";

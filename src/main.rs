@@ -37,6 +37,8 @@ struct DraftState {
     /// for the broadcast QRs.
     commit_hex: String,
     reveal_hex: String,
+    /// The comet's Urbit `@p` — used only for the boot script's `--comet` arg.
+    /// The user-facing name is the mnemonym (shown via `SpawnProgress.comet`).
     comet: String,
     /// The `0v…` boot feed (embeds the comet's private key) for the USB key file.
     feed_uw: String,
@@ -472,6 +474,7 @@ fn spawn_poll(mine: &Arc<Mutex<MineShared>>, draft: &Rc<RefCell<DraftState>>) ->
                 let mut d = draft.borrow_mut();
                 d.commit_hex = r.commit_raw_hex.clone();
                 d.reveal_hex = r.reveal_raw_hex.clone();
+                // Keep the @p in the draft: the boot script's `--comet` needs it.
                 d.comet = r.comet_patp.clone();
                 d.feed_uw = r.feed_uw.clone();
             }
@@ -480,7 +483,8 @@ fn spawn_poll(mine: &Arc<Mutex<MineShared>>, draft: &Rc<RefCell<DraftState>>) ->
                 ok: true,
                 error: SharedString::new(),
                 tries: tries as i32,
-                comet: r.comet_patp.into(),
+                // The user sees the mnemonym; the boot command/script keep the @p.
+                comet: r.comet_nym.into(),
                 commit_txid: r.commit_txid_display.into(),
                 reveal_txid: r.reveal_txid_display.into(),
                 boot_command: r.boot_command.into(),

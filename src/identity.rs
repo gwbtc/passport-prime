@@ -61,6 +61,64 @@ pub fn to_patp(atom_le: &[u8]) -> String {
     format!("~{acc}")
 }
 
+/// The 2048-word groundwire mnemonyms wordlist (gwbtc/mnemonyms `wordlists/english.txt`).
+const NYM_WORDS: &str = include_str!("wordlist-english.txt");
+
+fn nym_word(idx: u16) -> &'static str {
+    NYM_WORDS.lines().nth(idx as usize).expect("nym index in 0..2048")
+}
+
+/// Render an atom (little-endian bytes) as a groundwire **mnemonym** — the
+/// gwbtc/mnemonyms naming that replaces the Urbit `@p` for a mined comet
+/// (`gwbtc/mnemonyms` `++name`/`decode`). The atom is treated as big-endian
+/// entropy: BIP-39-style, `width/32` SHA-256 checksum bits are appended, the
+/// `width + width/32` bits are split into 11-bit wordlist indices, leading
+/// zero-index words are dropped, and the words are dot-joined behind a `..`
+/// (untweaked) prefix.
+///
+/// `atom_le.len()` sets the width and must be a non-zero multiple of 4 bytes
+/// (32 bits) — a comet is always 16 bytes, matching the reference vectors.
+pub fn to_nym(atom_le: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    debug_assert!(
+        !atom_le.is_empty() && atom_le.len() % 4 == 0,
+        "to_nym width must be a non-zero multiple of 32 bits"
+    );
+    // mnemonyms operates on big-endian entropy; our atoms are little-endian.
+    let data: Vec<u8> = atom_le.iter().rev().copied().collect();
+    let cs_bits = data.len() / 4; // width/32 checksum bits
+    let hash = Sha256::digest(&data);
+
+    // Bit string: entropy bits (MSB first) then the top `cs_bits` of the hash.
+    let mut bits: Vec<u8> = Vec::with_capacity(data.len() * 8 + cs_bits);
+    for &b in &data {
+        for i in (0..8).rev() {
+            bits.push((b >> i) & 1);
+        }
+    }
+    for k in 0..cs_bits {
+        bits.push((hash[k / 8] >> (7 - k % 8)) & 1);
+    }
+
+    // Chunk into 11-bit indices (total bits are always a multiple of 11).
+    let mut indices: Vec<u16> = bits
+        .chunks(11)
+        .map(|c| c.iter().fold(0u16, |acc, &b| (acc << 1) | b as u16))
+        .collect();
+    while indices.first() == Some(&0) {
+        indices.remove(0);
+    }
+
+    let mut out = String::from("..");
+    for (i, &idx) in indices.iter().enumerate() {
+        if i > 0 {
+            out.push('.');
+        }
+        out.push_str(nym_word(idx));
+    }
+    out
+}
+
 /// A freshly generated identity, ready to show on the create screen.
 pub struct IdentityDraft {
     /// The taproot funding address the user pays into.
@@ -272,5 +330,29 @@ mod tests {
 
     fn hex16(s: &str) -> Vec<u8> {
         (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    }
+
+    // Official gwbtc/mnemonyms `test-vectors.json` (english): big-endian entropy
+    // hex → nym. Covers 128/192/256-bit widths, all-zero (leading-word drop),
+    // all-ones, and a real random 128-bit value (a comet-sized atom).
+    #[test]
+    fn nym_reference_vectors() {
+        let cases = [
+            ("00000000000000000000000000000000", "..abducts"),
+            ("ffffffffffffffffffffffffffffffff",
+             "..yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.yourselves.withdraw"),
+            ("9e885d952ad362caeb4efe34a8e91bd2",
+             "..intrust.confound.detract.defeat.cascades.detracts.obscured.restrain.canoe.constructs.constraint.marines"),
+            ("c0ba5a8e914111210f2bd131f3d5e08d",
+             "..profess.rejoins.malign.await.allude.foresees.compute.endow.brocade.invade.enacts.aside"),
+            ("000000000000000000000000000000000000000000000000", "..accost"),
+            ("6610b25967cdcca9d59875f5cb50b0ea75433311869e930b",
+             "..devolves.evade.hotels.regain.reserves.deface.defense.ahead.unreal.delight.benight.rely.decries.increase.console.relents.frontiers.delete"),
+            ("0000000000000000000000000000000000000000000000000000000000000000", "..afoul"),
+        ];
+        for (be_hex, nym) in cases {
+            let le: Vec<u8> = hex16(be_hex).into_iter().rev().collect();
+            assert_eq!(to_nym(&le), nym, "nym mismatch for {be_hex}");
+        }
     }
 }

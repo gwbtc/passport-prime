@@ -12,14 +12,14 @@ export struct IdentitySummary {
     label: string,
     address: string,
     stage: int,   // src/store.rs::stage — 1 backed-up · 2 funded · 5 attested · 6 live
-    comet: string, // @p once attested, else ""
+    comet: string, // groundwire mnemonym once attested, else ""
 }
 
 // Result of the on-device spawn (mine + build + sign).
 export struct SpawnOutcome {
     ok: bool,
     error: string,
-    comet: string,        // the mined @p
+    comet: string,        // the mined comet's groundwire mnemonym
     commit-txid: string,  // display hex
     reveal-txid: string,  // display hex
     boot-command: string, // vere -G one-liner

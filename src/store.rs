@@ -48,7 +48,8 @@ pub struct Identity {
     /// onboarding can resume straight to the mine step. Empty until funded.
     #[serde(default)]
     pub funding: String,
-    /// Comet name (@p), recorded at attestation. Provisional until `stage >= ATTESTED`.
+    /// Comet name (groundwire mnemonym), recorded at attestation for display.
+    /// Provisional until `stage >= ATTESTED`.
     #[serde(default)]
     pub comet: String,
     #[serde(default)]

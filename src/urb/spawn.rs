@@ -6,7 +6,7 @@
 
 use sha2::{Digest, Sha256};
 
-use crate::identity::{taproot_keypath, to_patp};
+use crate::identity::{taproot_keypath, to_nym, to_patp};
 
 use super::{boot, encoder, mine, tweak, tx};
 
@@ -73,7 +73,12 @@ fn wire_to_display(wire: &[u8; 32]) -> String {
 
 /// Everything the wizard shows after a successful on-device spawn.
 pub struct SpawnResult {
+    /// The comet's Urbit `@p` — kept for the boot command's `--comet` arg (vere
+    /// names the ship by `@p`); not shown to the user.
     pub comet_patp: String,
+    /// The comet's groundwire mnemonym — the user-facing name (see
+    /// [`crate::identity::to_nym`]).
+    pub comet_nym: String,
     pub comet_atom: [u8; 16],
     pub commit_raw_hex: String,
     pub commit_txid_display: String,
@@ -132,12 +137,14 @@ pub fn assemble_spawn(
 
     let feed = boot::jam_feed(&mined.comet, 0, 1, &mined.ring_atom);
     let comet_patp = to_patp(&mined.comet);
+    let comet_nym = to_nym(&mined.comet);
     // The feed goes to a USB key file; the on-screen command reads it from there.
     let feed_uw = boot::atom_to_uw(&feed);
     let boot_command = boot::format_boot_command_keyfile(&comet_patp, boot_script_url, None);
 
     Ok(SpawnResult {
         comet_patp,
+        comet_nym,
         comet_atom: mined.comet,
         commit_raw_hex: hex(&txs.commit_raw),
         commit_txid_display: wire_to_display(&txs.commit_txid),
@@ -300,6 +307,9 @@ mod tests {
         let r = assemble_spawn(&seed, &funding, &mined, 2, &[0u8; 32], "https://groundwire.io/causeway/boot.sh").unwrap();
 
         assert!(r.comet_patp.starts_with('~'));
+        // The user-facing name is the mnemonym; the boot command keeps the @p.
+        assert!(r.comet_nym.starts_with(".."));
+        assert!(!r.boot_command.contains(&r.comet_nym));
         assert!(!r.commit_raw_hex.is_empty() && r.commit_raw_hex.len() % 2 == 0);
         assert!(!r.reveal_raw_hex.is_empty());
         assert_eq!(r.commit_txid_display.len(), 64);
