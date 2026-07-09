@@ -12,7 +12,7 @@ mod identity;
 #[path = "../../src/urb/mod.rs"]
 mod urb;
 
-use identity::to_patp;
+use identity::{to_nym, to_patp};
 use urb::{boot, encoder, mine, spawn, tweak};
 
 fn hex(b: &[u8]) -> String {
@@ -84,6 +84,10 @@ pub fn run_report() -> String {
     // 3. @p rendering (comet range, no ob scramble).
     let p = to_patp(&512u16.to_le_bytes());
     line(&mut out, &mut pass, &mut total, "to_patp (512 -> ~binzod)", p == "~binzod", &p);
+
+    // 3b. groundwire mnemonym (128-bit comet atom; all-zero -> "..abducts").
+    let nym0 = to_nym(&[0u8; 16]);
+    line(&mut out, &mut pass, &mut total, "to_nym (0 -> ..abducts)", nym0 == "..abducts", &nym0);
 
     // 4. @uw boot-feed encoding across the u128 boundary.
     let mut wide = [0u8; 24];
@@ -172,6 +176,15 @@ pub unsafe extern "C" fn tweak(txid_ptr: *const u8, txid_len: usize, vout: u64, 
 #[no_mangle]
 pub unsafe extern "C" fn patp(atom_ptr: *const u8, atom_len: usize) -> u64 {
     pack(to_patp(input(atom_ptr, atom_len)).into_bytes())
+}
+
+/// `to_nym(atom_le)` — the comet's groundwire mnemonym. Input: raw little-endian
+/// atom bytes (16 for a comet). Output: the UTF-8 `..word.word…` name.
+///
+/// # Safety: `atom_ptr`/`atom_len` must be a valid buffer in wasm memory.
+#[no_mangle]
+pub unsafe extern "C" fn nym(atom_ptr: *const u8, atom_len: usize) -> u64 {
+    pack(to_nym(input(atom_ptr, atom_len)).into_bytes())
 }
 
 /// `atom_to_uw(le)` — the `@uw` boot-feed rendering. Input: raw LE atom bytes.

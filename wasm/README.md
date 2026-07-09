@@ -33,5 +33,5 @@ ed25519 mine + taproot commit/reveal sign.
 
 No `wasm-bindgen`. Byte buffers cross as a packed `u64` = `(ptr<<32)|len` into
 the exported `memory`; callers `__alloc` inputs and `__dealloc` every returned
-buffer. Exports: `tweak`, `patp`, `uw`, `encode_spawn`, `self_test`. A ~40-line
+buffer. Exports: `tweak`, `patp`, `nym`, `uw`, `encode_spawn`, `self_test`. A ~40-line
 JS/TS wrapper hides the marshalling (see `index.html` / the Causeway binding).
