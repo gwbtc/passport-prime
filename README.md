@@ -114,6 +114,15 @@ cargo test --bins
 `./sim` runs `foundation sim` inside a memory-capped systemd scope
 (`SIM_MEM_MAX`, default 12G) to keep the emulator from OOM-ing the host.
 
+To run on a **physical Passport Prime** — the only way to measure real mining
+speed and exercise the Airlock USB boot-key export — sideload it:
+
+```sh
+foundation sideload --release   # build → sign → copy over USB → launch
+```
+
+Full setup (signing key, device trust, logs, troubleshooting): `docs/sideloading.md`.
+
 > **Simulator + Wayland (non-NixOS hosts).** The SDK's `gui-server` is built
 > with a Nix glibc loader that doesn't read the system `ld.so.cache`, so its
 > runtime `dlopen("libwayland-client.so.0")` fails with `NoWaylandLib` even
